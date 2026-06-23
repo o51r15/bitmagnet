@@ -176,10 +176,17 @@ func createTorrentModel(
 			break
 		}
 
+		// Exclude BEP-47 padding files (PR #458).
+		// Padding files are .pad/<size> synthetic entries that waste DB rows.
+		displayPath := file.DisplayPath(&info)
+		if len(displayPath) >= 5 && displayPath[:5] == ".pad/" {
+			continue
+		}
+
 		files = append(files, model.TorrentFile{
 			InfoHash: hash,
 			Index:    uint(i),
-			Path:     file.DisplayPath(&info),
+			Path:     displayPath,
 			Size:     uint(file.Length),
 		})
 	}
