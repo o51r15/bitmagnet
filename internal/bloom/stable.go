@@ -7,8 +7,12 @@ import (
 	boom "github.com/tylertreat/BoomFilters"
 )
 
+// StableBloomFilter wraps boom.StableBloomFilter via a pointer embed.
+// The upstream type must not be copied by value — doing so can produce nil
+// pointer panics during database Scan operations. Using a pointer embed
+// guarantees safe initialisation and assignment. (Fixes PR #446)
 type StableBloomFilter struct {
-	boom.StableBloomFilter
+	*boom.StableBloomFilter
 }
 
 const (
@@ -18,7 +22,7 @@ const (
 )
 
 func NewDefaultStableBloomFilter() *StableBloomFilter {
-	return &StableBloomFilter{*boom.NewStableBloomFilter(defaultCapacity, defaultD, defaultFpRate)}
+	return &StableBloomFilter{boom.NewStableBloomFilter(defaultCapacity, defaultD, defaultFpRate)}
 }
 
 func (s *StableBloomFilter) Scan(value interface{}) error {
@@ -32,7 +36,8 @@ func (s *StableBloomFilter) Scan(value interface{}) error {
 		return err
 	}
 
-	s.StableBloomFilter = *bf
+	// Assign the pointer directly — avoids unsafe value copy of StableBloomFilter.
+	s.StableBloomFilter = bf
 
 	return nil
 }
