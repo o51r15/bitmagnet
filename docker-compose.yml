@@ -7,11 +7,10 @@ services:
     deploy:
       resources:
         limits:
-          # Hard cap prevents bitmagnet from consuming all host RAM and
-          # triggering a kernel OOM kill that takes down the whole machine.
-          # 1.5GB is comfortable headroom for split workers at default scaling.
-          # Raise to 2g if you increase dht_crawler.scaling_factor above 4.
-          memory: 1536m
+          # 1GB hard cap on an 8GB host.
+          # OS + Postgres (2GB) + bitmagnet (1GB) = ~3GB committed,
+          # leaving ~5GB free for OS page cache and other services.
+          memory: 1g
         reservations:
           memory: 256m
     ports:
@@ -41,14 +40,13 @@ services:
     deploy:
       resources:
         limits:
-          # Postgres is the real memory bottleneck. Give it dedicated headroom.
-          # shared_buffers below is 512MB so the container limit must exceed that.
-          # 2GB gives comfortable room for work_mem, connections, and OS page cache.
+          # 2GB for Postgres on an 8GB host.
+          # shared_buffers is 512MB (~25% of limit) — do not exceed this ratio
+          # or Postgres will fight with the OS page cache for the same pages.
           memory: 2g
         reservations:
-          memory: 1g
-    # shm_size must be >= shared_buffers
-    shm_size: 1g
+          memory: 512m
+    shm_size: 512m
     volumes:
       - ./data/postgres:/var/lib/postgresql/data
     #  - "5432:5432"   # uncomment to access DB directly
@@ -59,23 +57,17 @@ services:
     command:
       - postgres
       # ---- Memory --------------------------------------------------------
-      # shared_buffers: ~25% of container memory limit (2g = 512MB)
       - -c
       - shared_buffers=512MB
-      # effective_cache_size: how much total RAM Postgres + OS can cache.
-      # ~75% of container limit. Helps the query planner make better decisions.
       - -c
       - effective_cache_size=1536MB
-      # work_mem: per-sort/per-hash memory. Keep low so concurrent connections
-      # don't multiply into OOM. 16MB x 50 connections = 800MB worst case.
+      # work_mem reduced to 8MB for 8GB host.
+      # 50 connections x 8MB = 400MB worst case, well within limits.
       - -c
-      - work_mem=16MB
-      # maintenance_work_mem: used by VACUUM, CREATE INDEX, etc.
+      - work_mem=8MB
       - -c
-      - maintenance_work_mem=128MB
+      - maintenance_work_mem=64MB
       # ---- Connections ---------------------------------------------------
-      # bitmagnet uses a small internal pool. 50 is plenty and prevents
-      # connection storms from spiking RAM.
       - -c
       - max_connections=50
       # ---- WAL / Checkpoints ---------------------------------------------
@@ -84,17 +76,11 @@ services:
       - -c
       - checkpoint_completion_target=0.9
       - -c
-      - max_wal_size=2GB
+      - max_wal_size=1GB
       # ---- SSD optimisation ----------------------------------------------
-      # Tells the planner random I/O is cheap — correct for NVMe/SSD.
-      # Change to 4.0 if running on a spinning disk.
       - -c
       - random_page_cost=1.1
       # ---- Autovacuum ----------------------------------------------------
-      # Bitmagnet writes millions of rows per day. Aggressive autovacuum
-      # prevents table bloat which is one of the primary causes of long-term
-      # query slowdown. These settings run autovacuum earlier and more often
-      # than the defaults, at the cost of slightly more background I/O.
       - -c
       - autovacuum_vacuum_scale_factor=0.05
       - -c
@@ -104,7 +90,7 @@ services:
       - -c
       - autovacuum_naptime=20s
       - -c
-      - autovacuum_max_workers=3
+      - autovacuum_max_workers=2
     healthcheck:
       test:
         - CMD-SHELL
