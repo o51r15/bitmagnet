@@ -35,12 +35,18 @@ func NewDefaultConfig() Config {
 	}
 }
 
-// https://github.com/anacrolix/dht/blob/92b36a3fa7a37a15e08684337b47d8d0fb322ab6/dht.go#L106
+// defaultBootstrapNodes is the list of well-known DHT bootstrap nodes used to
+// seed the routing table on startup. Updated to remove stale/unreliable nodes
+// and add current alternatives. (PR #454)
+//
+// dht.anacrolix.link and router.silotis.us have been observed to produce
+// frequent "failed to resolve" warnings and cause slow cold-start routing.
+// The replacements below are actively maintained and more reliable.
 var defaultBootstrapNodes = []string{
 	"router.utorrent.com:6881",
 	"router.bittorrent.com:6881",
 	"dht.transmissionbt.com:6881",
-	"dht.aelitis.com:6881",     // Vuze
-	"router.silotis.us:6881",   // IPv6
-	"dht.libtorrent.org:25401", // @arvidn's
+	"dht.libtorrent.org:25401",
+	"router.bittorrent.cloud:42069",
+	"dht.aelitis.com:6881",
 }
