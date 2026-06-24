@@ -40,37 +40,83 @@ that have documented fixes available but not yet merged upstream.
 
 ## Deployment
 
-### Quick start
+### Pre-flight — create directories and config on the host
+
+Before deploying, create the required directories and drop in the runtime config:
+
+```bash
+mkdir -p /home/o51r15/docker/bitmagnet/config
+mkdir -p /home/o51r15/docker/bitmagnet/data/postgres
+
+cat > /home/o51r15/docker/bitmagnet/config/config.yml << 'EOF'
+dht_crawler:
+  scaling_factor: 1
+  save_files_threshold: 50
+  save_pieces: false
+  rescrape_threshold: 720h
+
+processor:
+  concurrency: 2
+
+tmdb:
+  enabled: true
+
+log:
+  level: warn
+  file_rotator:
+    enabled: false
+EOF
+```
+
+---
+
+### Deploying via Portainer
+
+The compose file uses `${VAR}` substitution for secrets. Portainer supports this natively
+through its **Environment variables** section — no `.env` file needed on disk.
+
+**Steps:**
+
+1. In Portainer, go to **Stacks → Add stack**
+2. Paste the contents of `docker-compose.yml` into the compose editor
+3. Scroll down to the **Environment variables** section
+4. Add the following two variables:
+
+| Name | Value |
+|---|---|
+| `TMDB_API_KEY` | your TMDB API key |
+| `POSTGRES_PASSWORD` | your chosen Postgres password |
+
+5. Click **Deploy the stack**
+
+The volume paths in the compose are absolute (`/home/o51r15/docker/bitmagnet/...`) so Portainer
+resolves them correctly to your host filesystem rather than its own internal working directory.
+
+---
+
+### Deploying via Docker Compose CLI
 
 ```bash
 git clone https://github.com/o51r15/bitmagnet.git
 cd bitmagnet
 cp .env.example .env
-# Edit .env and fill in your TMDB API key and Postgres password
+# Edit .env and fill in TMDB_API_KEY and POSTGRES_PASSWORD
 docker compose up -d
 ```
 
-### Environment variables
-
-Secrets are kept out of `docker-compose.yml` and read from a `.env` file at runtime.
-Copy `.env.example` to `.env` and fill in your values:
-
-```
-TMDB_API_KEY=your_tmdb_api_key_here
-POSTGRES_PASSWORD=your_password_here
-```
-
 `.env` is listed in `.gitignore` and will never be committed.
+
+---
 
 ### Postgres tuning — no custom image required
 
 The `docker-compose.yml` includes a full set of Postgres performance tunings targeted
 at a write-heavy DHT crawl workload on SSD. These are applied via Postgres's standard
-`-c key=value` command-line flags in the compose `command:` block — equivalent to
-editing `postgresql.conf` but without touching the image. The image remains unmodified
-vanilla `postgres:16-alpine`. No fork, no custom build, no extra maintenance surface.
+`-c key=value` command-line flags in the compose `command:` block — equivalent to editing
+`postgresql.conf` but without touching the image. The image remains unmodified vanilla
+`postgres:16-alpine`. No fork, no custom build, no extra maintenance surface.
 
-Any user pulling this compose file gets all tunings automatically on `docker compose up`.
+Any user pulling this compose file gets all tunings automatically on deploy.
 
 The current settings are calibrated for an **8GB host**:
 
@@ -92,7 +138,9 @@ The current settings are calibrated for an **8GB host**:
 | `autovacuum_max_workers` | 2 | Two background vacuum workers |
 
 If your host has more RAM, raise `shared_buffers`, `effective_cache_size`, and `work_mem`
-proportionally. The ratio rules (25% / 75%) stay the same regardless of total RAM.
+proportionally. The 25%/75% ratio rules stay the same regardless of total RAM.
+
+---
 
 ### bitmagnet runtime config
 
