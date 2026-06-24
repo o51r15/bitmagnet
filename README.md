@@ -38,6 +38,75 @@ that have documented fixes available but not yet merged upstream.
 
 ---
 
+## Deployment
+
+### Quick start
+
+```bash
+git clone https://github.com/o51r15/bitmagnet.git
+cd bitmagnet
+cp .env.example .env
+# Edit .env and fill in your TMDB API key and Postgres password
+docker compose up -d
+```
+
+### Environment variables
+
+Secrets are kept out of `docker-compose.yml` and read from a `.env` file at runtime.
+Copy `.env.example` to `.env` and fill in your values:
+
+```
+TMDB_API_KEY=your_tmdb_api_key_here
+POSTGRES_PASSWORD=your_password_here
+```
+
+`.env` is listed in `.gitignore` and will never be committed.
+
+### Postgres tuning — no custom image required
+
+The `docker-compose.yml` includes a full set of Postgres performance tunings targeted
+at a write-heavy DHT crawl workload on SSD. These are applied via Postgres's standard
+`-c key=value` command-line flags in the compose `command:` block — equivalent to
+editing `postgresql.conf` but without touching the image. The image remains unmodified
+vanilla `postgres:16-alpine`. No fork, no custom build, no extra maintenance surface.
+
+Any user pulling this compose file gets all tunings automatically on `docker compose up`.
+
+The current settings are calibrated for an **8GB host**:
+
+| Parameter | Value | Reason |
+|---|---|---|
+| `shared_buffers` | 512MB | ~25% of the 2GB container limit — the recommended ratio |
+| `effective_cache_size` | 1536MB | ~75% of container limit; guides the query planner |
+| `work_mem` | 8MB | 50 connections × 8MB = 400MB worst case |
+| `maintenance_work_mem` | 64MB | Used by VACUUM and index builds |
+| `max_connections` | 50 | Prevents connection storm memory spikes |
+| `wal_buffers` | 16MB | Smooths write flushing under bursty crawl load |
+| `checkpoint_completion_target` | 0.9 | Spreads checkpoint I/O over more time |
+| `max_wal_size` | 1GB | Limits WAL growth between checkpoints |
+| `random_page_cost` | 1.1 | Tells the planner random I/O is cheap — correct for SSD |
+| `autovacuum_vacuum_scale_factor` | 0.05 | Runs VACUUM earlier; critical for tables with millions of daily inserts |
+| `autovacuum_analyze_scale_factor` | 0.025 | Keeps statistics fresh for the query planner |
+| `autovacuum_vacuum_cost_delay` | 2ms | More aggressive autovacuum I/O budget |
+| `autovacuum_naptime` | 20s | Checks tables for vacuuming more frequently |
+| `autovacuum_max_workers` | 2 | Two background vacuum workers |
+
+If your host has more RAM, raise `shared_buffers`, `effective_cache_size`, and `work_mem`
+proportionally. The ratio rules (25% / 75%) stay the same regardless of total RAM.
+
+### bitmagnet runtime config
+
+`config/config.yml` is mounted into the container and sets safe runtime defaults:
+
+| Setting | Value | Reason |
+|---|---|---|
+| `dht_crawler.scaling_factor` | 1 | Keeps goroutine count at ~101; raise after M0.3 lands |
+| `dht_crawler.save_files_threshold` | 50 | Limits per-torrent DB write storms |
+| `processor.concurrency` | 2 | Safe post queue index fix; doubles queue drain throughput |
+| `log.level` | warn | Reduces log I/O under sustained crawl load |
+
+---
+
 ## Changes from upstream
 
 All changes are applied as individual commits for easy review and potential upstream submission.
@@ -111,26 +180,6 @@ ghcr.io/o51r15/bitmagnet:latest
 
 Each push also produces a short-SHA tag (e.g. `ghcr.io/o51r15/bitmagnet:sha-9dc16bf`) for pinning
 to a specific build if needed.
-
----
-
-## Using this fork
-
-Pull the pre-built image directly:
-
-```yaml
-services:
-  bitmagnet:
-    image: ghcr.io/o51r15/bitmagnet:latest
-```
-
-Or build from source:
-
-```bash
-git clone https://github.com/o51r15/bitmagnet.git
-cd bitmagnet
-docker build -f ci.Dockerfile -t bitmagnet-stability .
-```
 
 ---
 
