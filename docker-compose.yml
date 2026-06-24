@@ -13,14 +13,27 @@ services:
           memory: 1g
         reservations:
           memory: 256m
+    ulimits:
+      nofile:
+        soft: 65535
+        hard: 65535
+        # Default container fd limit is 1024. The DHT crawler opens many
+        # concurrent goroutines blocked on UDP operations. While the server
+        # uses a single socket fd, goroutine stacks and internal file handles
+        # can approach the default limit under sustained crawl load causing
+        # silent failures. 65535 gives comfortable headroom.
     ports:
       - "3333:3333"
       - "3334:3334/tcp"
       - "3334:3334/udp"
     environment:
       - POSTGRES_HOST=postgres
-      - POSTGRES_PASSWORD=postgres
-      - TMDB_API_KEY=381d3ff27e9a8db578cc55018ae60386
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - TMDB_API_KEY=${TMDB_API_KEY}
+      # TZ=UTC ensures container timestamps match what the UI expects.
+      # Without this the "last torrent found N hours ago" display is wrong
+      # by your UTC offset, causing false alarms about crawler health.
+      - TZ=UTC
     volumes:
       - ./config:/root/.config/bitmagnet
     command:
@@ -51,9 +64,10 @@ services:
       - ./data/postgres:/var/lib/postgresql/data
     #  - "5432:5432"   # uncomment to access DB directly
     environment:
-      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
       - POSTGRES_DB=bitmagnet
       - PGUSER=postgres
+      - TZ=UTC
     command:
       - postgres
       # ---- Memory --------------------------------------------------------
@@ -61,8 +75,7 @@ services:
       - shared_buffers=512MB
       - -c
       - effective_cache_size=1536MB
-      # work_mem reduced to 8MB for 8GB host.
-      # 50 connections x 8MB = 400MB worst case, well within limits.
+      # work_mem: 8MB x 50 connections = 400MB worst case on 8GB host
       - -c
       - work_mem=8MB
       - -c
