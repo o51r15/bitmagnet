@@ -40,9 +40,17 @@ that have documented fixes available but not yet merged upstream.
 
 ## Deployment
 
-### Pre-flight — create directories and config on the host
+### Step 1 — Get a free TMDB API key
 
-Before deploying, create the required directories and drop in the runtime config:
+bitmagnet uses [The Movie Database](https://www.themoviedb.org) to classify content.
+A free API key is required. Get one at [themoviedb.org/settings/api](https://www.themoviedb.org/settings/api) —
+create a free account, request an API key, and copy the **API Read Access Token**.
+
+---
+
+### Step 2 — Prepare the host
+
+Run these commands on your Docker host to create the required directories and config file:
 
 ```bash
 mkdir -p /home/o51r15/docker/bitmagnet/config
@@ -70,41 +78,25 @@ EOF
 
 ---
 
-### Deploying via Portainer
+### Step 3 — Deploy
 
-The compose file uses `${VAR}` substitution for secrets. Portainer supports this natively
-through its **Environment variables** section — no `.env` file needed on disk.
+**Via Portainer:**
 
-**Steps:**
-
-1. In Portainer, go to **Stacks → Add stack**
+1. Go to **Stacks → Add stack**
 2. Paste the contents of `docker-compose.yml` into the compose editor
-3. Scroll down to the **Environment variables** section
-4. Add the following two variables:
+3. Find the two lines that need your values and update them directly in the editor:
+   - `TMDB_API_KEY=your_tmdb_key_here` → replace with your key from Step 1
+   - `POSTGRES_PASSWORD=postgres` → leave as-is or set your own password (must match in both places)
+4. Click **Deploy the stack**
 
-| Name | Value |
-|---|---|
-| `TMDB_API_KEY` | your TMDB API key |
-| `POSTGRES_PASSWORD` | your chosen Postgres password |
-
-5. Click **Deploy the stack**
-
-The volume paths in the compose are absolute (`/home/o51r15/docker/bitmagnet/...`) so Portainer
-resolves them correctly to your host filesystem rather than its own internal working directory.
-
----
-
-### Deploying via Docker Compose CLI
+**Via Docker Compose CLI:**
 
 ```bash
 git clone https://github.com/o51r15/bitmagnet.git
 cd bitmagnet
-cp .env.example .env
-# Edit .env and fill in TMDB_API_KEY and POSTGRES_PASSWORD
+# Edit docker-compose.yml and replace your_tmdb_key_here with your key
 docker compose up -d
 ```
-
-`.env` is listed in `.gitignore` and will never be committed.
 
 ---
 
@@ -148,9 +140,9 @@ proportionally. The 25%/75% ratio rules stay the same regardless of total RAM.
 
 | Setting | Value | Reason |
 |---|---|---|
-| `dht_crawler.scaling_factor` | 1 | Keeps goroutine count at ~101; raise after M0.3 lands |
+| `dht_crawler.scaling_factor` | 1 | Keeps goroutine count manageable; safe starting point |
 | `dht_crawler.save_files_threshold` | 50 | Limits per-torrent DB write storms |
-| `processor.concurrency` | 2 | Safe post queue index fix; doubles queue drain throughput |
+| `processor.concurrency` | 2 | Doubles queue drain throughput safely |
 | `log.level` | warn | Reduces log I/O under sustained crawl load |
 
 ---
