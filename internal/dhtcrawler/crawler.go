@@ -74,6 +74,8 @@ func (c *crawler) start() {
 	go c.runRequestMetaInfo(ctx)
 	go c.runScrape(ctx)
 	go c.reseedBootstrapNodes(ctx)
+	// Health monitor triggers emergency reseed when ktable drains. (M0.4)
+	go c.runKtableHealthMonitor(ctx)
 	go c.runPersistTorrents(ctx)
 	go c.runPersistSources(ctx)
 	go c.getOldNodes(ctx)
