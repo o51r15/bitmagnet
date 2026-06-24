@@ -24,7 +24,10 @@ import (
 // untagged fork builds (e.g. "built 2026-06-24"). Falls back to "dev" if
 // neither is set (local build without ldflags).
 func (r *queryResolver) Version(ctx context.Context) (string, error) {
-	if version.GitTag != "" {
+	// Only treat GitTag as a real version if it looks like a semver tag (e.g. "v1.2.3").
+	// For branch builds the CI passes the branch name (e.g. "main") as VERSION which
+	// lands here as GitTag — we don't want that surfaced as the UI version string.
+	if version.GitTag != "" && strings.HasPrefix(version.GitTag, "v") {
 		return version.GitTag, nil
 	}
 	if version.BuildTime != "" {
