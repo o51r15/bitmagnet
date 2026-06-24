@@ -81,7 +81,9 @@ func New(params Params) Result {
 						metainfoRequester:            params.MetainfoRequester,
 						banningChecker:               params.BanningChecker,
 						bootstrapNodes:               params.Config.BootstrapNodes,
-						reseedBootstrapNodesInterval: time.Minute * 10,
+						// Wire from config — was hardcoded to 10 minutes, ignoring the
+					// ReseedBootstrapNodesInterval config field entirely. (M0.4)
+					reseedBootstrapNodesInterval: params.Config.ReseedBootstrapNodesInterval,
 						getOldestNodesInterval:       time.Second * 10,
 						oldPeerThreshold:             time.Minute * 15,
 						discoveredNodes:              params.DiscoveredNodes,
