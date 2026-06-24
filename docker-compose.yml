@@ -17,23 +17,16 @@ services:
       nofile:
         soft: 65535
         hard: 65535
-        # Default container fd limit is 1024. Raised to prevent silent
-        # failures under sustained crawl load.
     ports:
       - "3333:3333"
       - "3334:3334/tcp"
       - "3334:3334/udp"
     environment:
       - POSTGRES_HOST=postgres
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
-      - TMDB_API_KEY=${TMDB_API_KEY}
-      # TZ=UTC prevents misleading "last torrent found N hours ago" display
-      # caused by the container running UTC while the browser uses local time.
+      - POSTGRES_PASSWORD=postgres        # change if you want a stronger password
+      - TMDB_API_KEY=your_tmdb_key_here  # free at themoviedb.org/settings/api
       - TZ=UTC
     volumes:
-      # Absolute paths required for Portainer compatibility.
-      # Create this directory and place config.yml inside it before deploying.
-      # See README for config.yml contents.
       - /home/o51r15/docker/bitmagnet/config:/root/.config/bitmagnet
     command:
       - worker
@@ -60,13 +53,12 @@ services:
           memory: 512m
     shm_size: 512m
     volumes:
-      # Absolute path required for Portainer compatibility.
       - /home/o51r15/docker/bitmagnet/data/postgres:/var/lib/postgresql/data
       # Uncomment to expose Postgres for direct access:
       # ports:
       #   - "5432:5432"
     environment:
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_PASSWORD=postgres        # must match POSTGRES_PASSWORD above
       - POSTGRES_DB=bitmagnet
       - PGUSER=postgres
       - TZ=UTC
@@ -74,12 +66,11 @@ services:
       - postgres
       # ---- Memory --------------------------------------------------------
       # All tunings below are standard Postgres -c flags applied at startup.
-      # No custom image is required — this is vanilla postgres:16-alpine.
+      # No custom image required — this is vanilla postgres:16-alpine.
       - -c
       - shared_buffers=512MB
       - -c
       - effective_cache_size=1536MB
-      # work_mem: 8MB x 50 connections = 400MB worst case on 8GB host
       - -c
       - work_mem=8MB
       - -c
