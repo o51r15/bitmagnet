@@ -17,11 +17,8 @@ services:
       nofile:
         soft: 65535
         hard: 65535
-        # Default container fd limit is 1024. The DHT crawler opens many
-        # concurrent goroutines blocked on UDP operations. While the server
-        # uses a single socket fd, goroutine stacks and internal file handles
-        # can approach the default limit under sustained crawl load causing
-        # silent failures. 65535 gives comfortable headroom.
+        # Default container fd limit is 1024. Raised to prevent silent
+        # failures under sustained crawl load.
     ports:
       - "3333:3333"
       - "3334:3334/tcp"
@@ -30,12 +27,14 @@ services:
       - POSTGRES_HOST=postgres
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
       - TMDB_API_KEY=${TMDB_API_KEY}
-      # TZ=UTC ensures container timestamps match what the UI expects.
-      # Without this the "last torrent found N hours ago" display is wrong
-      # by your UTC offset, causing false alarms about crawler health.
+      # TZ=UTC prevents misleading "last torrent found N hours ago" display
+      # caused by the container running UTC while the browser uses local time.
       - TZ=UTC
     volumes:
-      - ./config:/root/.config/bitmagnet
+      # Absolute paths required for Portainer compatibility.
+      # Create this directory and place config.yml inside it before deploying.
+      # See README for config.yml contents.
+      - /home/o51r15/docker/bitmagnet/config:/root/.config/bitmagnet
     command:
       - worker
       - run
@@ -61,8 +60,11 @@ services:
           memory: 512m
     shm_size: 512m
     volumes:
-      - ./data/postgres:/var/lib/postgresql/data
-    #  - "5432:5432"   # uncomment to access DB directly
+      # Absolute path required for Portainer compatibility.
+      - /home/o51r15/docker/bitmagnet/data/postgres:/var/lib/postgresql/data
+      # Uncomment to expose Postgres for direct access:
+      # ports:
+      #   - "5432:5432"
     environment:
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
       - POSTGRES_DB=bitmagnet
@@ -71,6 +73,8 @@ services:
     command:
       - postgres
       # ---- Memory --------------------------------------------------------
+      # All tunings below are standard Postgres -c flags applied at startup.
+      # No custom image is required — this is vanilla postgres:16-alpine.
       - -c
       - shared_buffers=512MB
       - -c
