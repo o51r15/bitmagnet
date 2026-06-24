@@ -1,0 +1,54 @@
+# ============================================================
+# bitmagnet — stability fork runtime configuration
+# Mounted into the container at /root/.config/bitmagnet/config.yml
+# ============================================================
+
+dht_crawler:
+  # Controls pipeline concurrency and channel buffer sizes throughout the
+  # crawler. Every goroutine pool is multiplied by this value. At 10 (default)
+  # up to 1,010 goroutines can be simultaneously blocked on UDP operations.
+  # At 1, that drops to ~101. Keep at 1 until milestone 0.3 (global UDP
+  # semaphore) is applied — at that point it can be safely raised.
+  scaling_factor: 1
+
+  # Maximum number of files saved per torrent. Some torrents contain thousands
+  # of entries; each is a separate DB write. 50 cuts worst-case write storms
+  # in half with negligible loss of useful data.
+  save_files_threshold: 50
+
+  # Piece data is large and has no current use. Keep off.
+  save_pieces: false
+
+  # How long before a torrent's seeder/leecher counts are re-scraped.
+  # 30 days reduces background DHT traffic without losing freshness.
+  rescrape_threshold: 720h
+
+# ---- Queue processor -------------------------------------------------------
+processor:
+  # Default is 1. Safe to raise to 2 now that the queue_jobs expression index
+  # (migration 00021) is applied. Before the index, each concurrent worker ran
+  # a 447ms queue poll query — at concurrency 2 that was ~900ms of contention
+  # per cycle. With the index the same query costs 0.23ms, making concurrency 2
+  # effectively free and doubling queue drain throughput.
+  # Do not raise above 3 on an 8GB host without monitoring memory.
+  concurrency: 2
+
+# ---- TMDB ------------------------------------------------------------------
+tmdb:
+  # API key is injected via TMDB_API_KEY environment variable in compose.
+  # With a personal key you get a dedicated rate limit rather than sharing
+  # the global limit with all other bitmagnet users. Without one, the queue
+  # processor stalls at 1 req/s shared across all instances which causes the
+  # queue to back up and grow unboundedly.
+  enabled: true
+
+# ---- Logging ---------------------------------------------------------------
+log:
+  # 'warn' skips per-torrent debug lines and reduces I/O pressure on the log
+  # writer. Switch to 'info' temporarily when diagnosing a specific issue.
+  level: warn
+
+  file_rotator:
+    # Only enable if you are running the Grafana/Loki observability stack.
+    # Writing every log line to disk adds unnecessary overhead otherwise.
+    enabled: false
