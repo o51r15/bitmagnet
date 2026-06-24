@@ -190,3 +190,157 @@ changes — it can be implemented as a Docker healthcheck script and documented 
 | `failed to hydrateHasOne` search errors ([#462](https://github.com/bitmagnet-io/bitmagnet/issues/462)) | Architectural limitation — requires OpenSearch integration planned by upstream |
 | IPv6 support ([#405](https://github.com/bitmagnet-io/bitmagnet/pull/405)) | Pending upstream design decision on dual-stack vs IPv6-only |
 | Disk size limit config key ([#495](https://github.com/bitmagnet-io/bitmagnet/issues/495)) | Partially addressed by milestone 0.6 guardrails; full feature is upstream scope |
+
+
+---
+
+---
+
+# V2 — Enrichment and Coverage Expansion
+
+> Work begins only after all v1 stability milestones are complete.
+> These are planned features, not fixes.
+
+---
+
+## V2 Overview
+
+The v1 fork addresses crash and lockup stability. V2 addresses data quality and coverage.
+Bitmagnet currently identifies content via TMDB alone, which produces poor results for
+content outside mainstream movies and TV — software, games, scene releases, foreign content,
+and anything TMDB doesn't index well. V2 introduces two new enrichment pipelines that
+dramatically improve identification quality and index completeness.
+
+---
+
+## V2 Road 1 — Prowlarr-Backed Hash Lookup (Reactive Enrichment)
+
+**Goal:** When the classifier cannot identify a torrent via TMDB, query Prowlarr as a
+fallback to cross-reference the hash or parsed title against configured indexers.
+
+### How it works
+
+Prowlarr acts as a broker — it abstracts per-site scraping, authentication, rate limiting,
+and result normalisation across hundreds of indexers. Bitmagnet already exposes itself as a
+Torznab endpoint for Sonarr/Radarr. This runs in reverse: bitmagnet queries Prowlarr's
+Torznab/Newznab API with a hash or title and receives enriched metadata back.
+
+### Config design
+
+```yaml
+prowlarr:
+  url: http://prowlarr:9696
+  api_key: your_key_here
+
+  # lookup_indexers: queried reactively when the classifier cannot identify
+  # a torrent via TMDB or local search. Should be high-quality curated sources
+  # where metadata is trustworthy. Rate limits apply — use sparingly.
+  lookup_indexers:
+    - 56   # e.g. BTN
+    - 78   # e.g. PTP
+```
+
+### Key implementation details
+
+- Lookup is triggered only after TMDB and local search have both failed
+- Results are cached — a successful lookup is stored; an empty result is also stored
+  so the same hash is never re-queried
+- A configurable throttle prevents hammering rate-limited indexers
+- Indexer IDs are passed directly to Prowlarr's API — no per-site logic in bitmagnet
+
+---
+
+## V2 Road 2 — Prowlarr-Backed Indexer Crawling (Proactive Ingestion)
+
+**Goal:** Poll configured indexers on a schedule via Prowlarr to proactively pull new
+magnets and their associated metadata, independent of what the DHT discovers.
+
+### How it works
+
+Instead of waiting for the DHT to surface a hash organically, bitmagnet polls Prowlarr
+on a schedule and ingests new listings directly. The magnet contains the hash, which slots
+into the existing `torrents` table. The metadata from the indexer (title, category,
+description, file list) supplements or replaces what the DHT/TMDB pipeline would produce.
+
+### Config design
+
+```yaml
+prowlarr:
+  url: http://prowlarr:9696
+  api_key: your_key_here
+
+  # crawl_indexers: polled proactively on a schedule for new magnets and metadata.
+  # Should be high-volume public trackers. Volume matters more than curation here.
+  crawl_indexers:
+    - id: 12    # e.g. TPB
+      interval: 15m
+    - id: 34    # e.g. 1337x
+      interval: 30m
+```
+
+### Key implementation details
+
+- Runs as a separate worker alongside the DHT crawler
+- Feeds the same persistence pipeline — no duplicate DB logic
+- Indexer-specific crawl intervals configurable per entry
+- Deduplication: hashes already in the DB are skipped
+
+---
+
+## V2 Road 3 — Public Tracker RSS Polling
+
+**Goal:** Poll public RSS feeds from major trackers to extract magnets and metadata in
+near-real-time without HTML scraping or API dependencies.
+
+### How it works
+
+Most public trackers publish RSS feeds of new uploads. These are lightweight, structured,
+and update continuously. A simple RSS worker polls configured feed URLs, extracts magnet
+links and metadata, and feeds results into the persistence pipeline. No authentication,
+no scraping, no per-site parser maintenance.
+
+### Why RSS first
+
+RSS is the lowest-friction starting point for Road 2 coverage. It requires no Prowlarr
+dependency, no authentication, and the feeds are stable and well-documented. HTML scraping
+is fragile and high-maintenance. RSS gives 80% of the coverage with 20% of the complexity.
+
+### Config design
+
+```yaml
+rss_crawler:
+  feeds:
+    - url: https://thepiratebay.org/rss/top100/200  # video
+      interval: 10m
+    - url: https://1337x.to/rss.xml
+      interval: 15m
+```
+
+---
+
+## V2 Enrichment Tier Summary
+
+```
+Tier 1 — DHT crawler (v1, existing)
+  Raw hash discovery from the network. Baseline coverage.
+
+Tier 2 — RSS crawler (V2 Road 3)
+  Proactive magnet + metadata ingestion from public tracker feeds.
+  High quality data for new and popular content, near real-time.
+
+Tier 3 — Prowlarr crawl (V2 Road 2)
+  Scheduled polling of configured Prowlarr indexers for magnets + metadata.
+  Covers content not on public RSS feeds, including private tracker content.
+
+Tier 4 — Prowlarr lookup (V2 Road 1)
+  Reactive fallback for hashes the classifier cannot identify via TMDB.
+  Queries Prowlarr only when all other identification has failed.
+```
+
+---
+
+## V2 Implementation Order
+
+1. **V2 Road 3 — RSS crawler** — standalone worker, no external dependencies, highest ROI
+2. **V2 Road 2 — Prowlarr crawl** — requires Prowlarr instance, builds on RSS patterns
+3. **V2 Road 1 — Prowlarr lookup** — most complex (cache, throttle, classifier integration)
