@@ -7,6 +7,8 @@ package resolvers
 import (
 	"context"
 	"sort"
+	"strings"
+	"time"
 
 	"github.com/bitmagnet-io/bitmagnet/internal/database/query"
 	"github.com/bitmagnet-io/bitmagnet/internal/gql"
@@ -18,8 +20,21 @@ import (
 )
 
 // Version is the resolver for the version field.
+// Returns GitTag for tagged releases, or a human-readable build date for
+// untagged fork builds (e.g. "built 2026-06-24"). Falls back to "dev" if
+// neither is set (local build without ldflags).
 func (r *queryResolver) Version(ctx context.Context) (string, error) {
-	return version.GitTag, nil
+	if version.GitTag != "" {
+		return version.GitTag, nil
+	}
+	if version.BuildTime != "" {
+		t, err := time.Parse(time.RFC3339, strings.TrimSpace(version.BuildTime))
+		if err == nil {
+			return "built " + t.UTC().Format("2006-01-02"), nil
+		}
+		return version.BuildTime, nil
+	}
+	return "dev", nil
 }
 
 // Workers is the resolver for the workers field.

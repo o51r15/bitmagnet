@@ -24,7 +24,10 @@ export GOARCH=$TARGETARCH; \
 [[ "$GOARCH" == "arm" ]] && [[ "$TARGETVARIANT" == "v6" ]] && export GOARM=6; \
 [[ "$GOARCH" == "arm" ]] && [[ "$TARGETVARIANT" == "v7" ]] && export GOARM=7; \
 echo $GOARCH $GOOS $GOARM$GOAMD64; \
-go build -ldflags "-s -w -X github.com/bitmagnet-io/bitmagnet/internal/version.GitTag=${VERSION}" -o /build/bitmagnet main.go
+go build -ldflags "-s -w \
+  -X github.com/bitmagnet-io/bitmagnet/internal/version.GitTag=${VERSION} \
+  -X github.com/bitmagnet-io/bitmagnet/internal/version.BuildTime=${BUILDTIME}" \
+  -o /build/bitmagnet main.go
 
 # build runner
 FROM alpine:latest AS runner
