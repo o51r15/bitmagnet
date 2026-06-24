@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/anacrolix/torrent/bencode"
+	"golang.org/x/sync/semaphore"
 	"github.com/bitmagnet-io/bitmagnet/internal/protocol/dht"
 	"github.com/bitmagnet-io/bitmagnet/internal/protocol/dht/responder"
 	"go.uber.org/zap"
@@ -31,6 +32,9 @@ type server struct {
 	responderTimeout time.Duration
 	idIssuer         IDIssuer
 	logger           *zap.SugaredLogger
+	// sem bounds concurrent in-flight queries globally across the server.
+	// Acquired before send, released on Query() return.
+	sem              *semaphore.Weighted
 }
 
 func (s *server) start() error {
@@ -180,6 +184,15 @@ func (s *server) Query(
 		A: &args,
 		Y: dht.YQuery,
 	}
+	// Acquire the global concurrent query semaphore before sending.
+	// This is the primary backpressure mechanism — it limits total in-flight
+	// UDP operations regardless of scaling_factor or pipeline concurrency.
+	if semErr := s.sem.Acquire(ctx, 1); semErr != nil {
+		err = semErr
+		return
+	}
+	defer s.sem.Release(1)
+
 	if sendErr := s.send(addr, msg); sendErr != nil {
 		s.logger.Debugw("could not send query", "msg", msg, "sendErr", sendErr)
 		err = sendErr

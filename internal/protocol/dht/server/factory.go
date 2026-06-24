@@ -8,6 +8,7 @@ import (
 
 	"github.com/bitmagnet-io/bitmagnet/internal/concurrency"
 	"github.com/bitmagnet-io/bitmagnet/internal/lazy"
+	"golang.org/x/sync/semaphore"
 	"github.com/bitmagnet-io/bitmagnet/internal/protocol/dht"
 	"github.com/bitmagnet-io/bitmagnet/internal/protocol/dht/responder"
 	"github.com/prometheus/client_golang/prometheus"
@@ -60,6 +61,7 @@ func New(p Params) Result {
 						responderTimeout: time.Second * 5,
 						idIssuer:         &variantIDIssuer{},
 						logger:           p.Logger.Named(subsystem),
+						sem:              semaphore.NewWeighted(p.Config.MaxConcurrentQueries),
 					},
 					lastResponses: lastResponses,
 				},
