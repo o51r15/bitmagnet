@@ -196,6 +196,72 @@ changes — it can be implemented as a Docker healthcheck script and documented 
 
 ---
 
+---
+
+## V2 Milestone 1 — Prowlarr Crawler (Scoped)
+
+> Status: Designed, not yet implemented.
+> Design session: 2026-06-25. Full spec in DEVLOG.md Session 5.
+
+### What it does
+
+Connects bitmagnet to a running Prowlarr instance. User selects which indexers to crawl
+and which categories to pull from each. Crawled torrents are added to the main DB.
+Metadata from the indexer only fills empty fields — existing data is never overwritten.
+A new Prowlarr UI page shows per-indexer torrent lists and allows on-demand crawl triggers.
+
+### Config
+
+```yaml
+prowlarr:
+  url: http://prowlarr:9696
+  api_key: your_key_here
+  indexers:
+    - id: 12
+      name: "The Pirate Bay"
+      enabled: true
+      schedule: "0 */6 * * *"
+      categories:
+        - Movies
+        - TV
+```
+
+### Scope (v1 of this feature)
+
+- Prowlarr client package with indexer discovery and search API calls
+- Per-indexer category selection using human-readable names (Movies, TV, Audio etc.)
+- Scheduled crawl and on-demand crawl via UI button
+- Upsert into main torrents table with source tracking (indexer name in torrents_torrent_source)
+- Metadata merge: fill gaps only, never overwrite existing identified data
+- Skip TMDB classification for Prowlarr-sourced torrents
+- Most recent page of results per run
+- New Prowlarr UI page: indexer dropdown, filtered torrent list, crawl now button
+
+### Deferred to future iteration
+
+- Metadata priority config (who wins on conflict: DHT vs indexer vs TMDB)
+- Pagination depth options and backfill on first run
+- Sort by seeders / exclude dead torrents (0 seeders)
+- TMDB enrichment option for Prowlarr-sourced torrents
+- Per-indexer crawl stats in UI
+
+### Implementation components
+
+| Component | Location | Notes |
+|---|---|---|
+| Prowlarr API client | `internal/prowlarr/client.go` | Wraps indexer list + search endpoints |
+| Config struct | `internal/prowlarr/config.go` | Indexer list, schedule, category map |
+| Crawl worker | `internal/prowlarr/crawler.go` | Fetch, build models, upsert |
+| fx wiring | `internal/prowlarr/factory.go` | |
+| Worker key | `prowlarr_crawler` | Registered alongside dht_crawler |
+| Migration | `migrations/00023_prowlarr_source.sql` | Index on torrents_torrent_source.source |
+| UI route | `/prowlarr` | New Angular route |
+| UI component | `webui/.../prowlarr/` | Dropdown, list, crawl button |
+| GraphQL query | `prowlarrIndexers` | Returns crawled indexers + stats |
+
+
+---
+
 # V2 — Enrichment and Coverage Expansion
 
 > Work begins only after all v1 stability milestones are complete.
