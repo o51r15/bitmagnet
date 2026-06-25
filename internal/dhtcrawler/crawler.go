@@ -56,6 +56,9 @@ type crawler struct {
 	stopped        chan struct{}
 	persistedTotal *prometheus.CounterVec
 	logger         *zap.SugaredLogger
+	// maxQueueDepth and queueDepth support the queue backpressure valve. (M0.5)
+	maxQueueDepth uint
+	queueDepth    *concurrency.AtomicValue[int64]
 }
 
 func (c *crawler) start() {
@@ -76,6 +79,8 @@ func (c *crawler) start() {
 	go c.reseedBootstrapNodes(ctx)
 	// Health monitor triggers emergency reseed when ktable drains. (M0.4)
 	go c.runKtableHealthMonitor(ctx)
+	// Queue depth monitor updates cached pending job count. (M0.5)
+	go c.runQueueDepthMonitor(ctx)
 	go c.runPersistTorrents(ctx)
 	go c.runPersistSources(ctx)
 	go c.getOldNodes(ctx)
