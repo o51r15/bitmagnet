@@ -39,6 +39,18 @@ func (c *crawler) runPersistTorrents(ctx context.Context) {
 
 			flushHashesToClassify := func() {
 				if len(hashesToClassify) > 0 {
+					// Queue backpressure: skip classification if the pending job
+					// count exceeds the configured maximum. Torrents are still
+					// persisted — they will be re-queued on the next reprocess run
+					// once the queue has drained. (M0.5)
+					if c.maxQueueDepth > 0 && c.queueDepth.Get() >= int64(c.maxQueueDepth) {
+						c.logger.Debugw("queue depth threshold reached, skipping classification",
+							"depth", c.queueDepth.Get(),
+							"max", c.maxQueueDepth,
+						)
+						hashesToClassify = make([]protocol.ID, 0, classifyBatchSize)
+						return
+					}
 					job, err := processor.NewQueueJob(processor.MessageParams{
 						InfoHashes: hashesToClassify,
 					},
@@ -170,14 +182,17 @@ func createTorrentModel(
 
 	files := make([]model.TorrentFile, 0, min(int(saveFilesThreshold), len(info.Files)))
 
+	// savedCount tracks real files saved — padding files must not consume
+	// threshold slots since they are skipped. Original index i is preserved
+	// for the Index field because torrent file indices are spec-meaningful.
+	savedCount := 0
 	for i, file := range info.Files {
-		if i >= int(saveFilesThreshold) {
+		if savedCount >= int(saveFilesThreshold) {
 			filesStatus = model.FilesStatusOverThreshold
 			break
 		}
 
 		// Exclude BEP-47 padding files (PR #458).
-		// Padding files are .pad/<size> synthetic entries that waste DB rows.
 		displayPath := file.DisplayPath(&info)
 		if len(displayPath) >= 5 && displayPath[:5] == ".pad/" {
 			continue
@@ -189,6 +204,7 @@ func createTorrentModel(
 			Path:     displayPath,
 			Size:     uint(file.Length),
 		})
+		savedCount++
 	}
 
 	var pieces model.TorrentPieces
@@ -287,4 +303,33 @@ func createTorrentSourceModel(
 		Seeders:  seeders,
 		Leechers: leechers,
 	}, nil
+}
+
+// runQueueDepthMonitor periodically queries the pending queue job count and
+// stores it in the crawler's cached queueDepth atomic value. This lets
+// runPersistTorrents gate new classification jobs without hitting the DB on
+// every batch. Update interval is 30 seconds — coarse enough to be cheap,
+// fine enough to respond to a draining queue within half a minute. (M0.5)
+func (c *crawler) runQueueDepthMonitor(ctx context.Context) {
+	const interval = 30 * time.Second
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(interval):
+			count, err := c.dao.WithContext(ctx).QueueJob.Where(
+				c.dao.QueueJob.Status.In(
+					string(model.QueueJobStatusPending),
+					string(model.QueueJobStatusRetry),
+				),
+			).Count()
+			if err != nil {
+				c.logger.Debugw("queue depth monitor: count failed", "error", err)
+				continue
+			}
+			c.queueDepth.Set(count)
+			c.logger.Debugw("queue depth updated", "depth", count, "max", c.maxQueueDepth)
+		}
+	}
 }
