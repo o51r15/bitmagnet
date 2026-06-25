@@ -20,7 +20,7 @@ Foundation fixes applied to the fork. All commits are on `main`.
 
 ---
 
-## Milestone 0.2 — Quick Wins (Config / Compose Level)
+## Milestone 0.2 — Quick Wins (Config / Compose Level) — COMPLETE (6c6016d)
 
 Low-risk, no Go code required. Estimated effort: 1 session.
 
@@ -33,7 +33,7 @@ Low-risk, no Go code required. Estimated effort: 1 session.
 
 ---
 
-## Milestone 0.3 — UDP Connection Cap (Go Code)
+## Milestone 0.3 — UDP Connection Cap (Go Code) — COMPLETE (e62c755)
 
 **Priority: High. Root cause of network saturation and the most widely reported community complaint.**
 
@@ -87,7 +87,7 @@ scaling_factor 10, and by ~98% at scaling_factor 1 (where we only need ~10 concu
 
 ---
 
-## Milestone 0.4 — DHT Crawler Network Recovery (Go Code)
+## Milestone 0.4 — DHT Crawler Network Recovery (Go Code) — COMPLETE (9757191)
 
 **Priority: High. Root cause of the 24-hour unrecoverable hang (Issue #359).**
 
@@ -134,7 +134,7 @@ The health check goroutine pattern is already used elsewhere in the codebase (se
 
 ---
 
-## Milestone 0.5 — Queue Backpressure (Go Code)
+## Milestone 0.5 — Queue Backpressure (Go Code) — COMPLETE (b06a191)
 
 **Priority: Medium. Prevents the queue from growing unboundedly under TMDB load.**
 
@@ -170,7 +170,7 @@ with our index fix (milestone 0.1), very large queue depths create several secon
 
 ---
 
-## Milestone 0.6 — DB Size Guardrails (Config Level)
+## Milestone 0.6 — DB Size Guardrails (Config Level) — COMPLETE (3048dd5)
 
 **Priority: Low-Medium. Prevents disk exhaustion killing Postgres non-gracefully.**
 
