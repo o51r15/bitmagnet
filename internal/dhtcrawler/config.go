@@ -22,6 +22,11 @@ type Config struct {
 	// RescrapeThreshold is the amount of time that must pass before a torrent is rescraped
 	// to count seeders and leechers.
 	RescrapeThreshold time.Duration
+	// MaxQueueDepth is the maximum number of pending+retry queue jobs before the crawler
+	// stops adding new classification jobs. 0 disables the check. When the threshold is
+	// reached, torrents are still written to the DB but skipped for classification until
+	// the queue drains. Prevents unbounded queue_jobs table growth under TMDB rate limits.
+	MaxQueueDepth uint
 }
 
 func NewDefaultConfig() Config {
@@ -32,6 +37,7 @@ func NewDefaultConfig() Config {
 		SaveFilesThreshold:           100,
 		SavePieces:                   false,
 		RescrapeThreshold:            time.Hour * 24 * 30,
+		MaxQueueDepth:                50000,
 	}
 }
 

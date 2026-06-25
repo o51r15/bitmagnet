@@ -127,6 +127,8 @@ func New(params Params) Result {
 						stopped:         make(chan struct{}),
 						persistedTotal:  persistedTotal,
 						logger:          params.Logger.Named("dht_crawler"),
+						maxQueueDepth:   params.Config.MaxQueueDepth,
+						queueDepth:      &concurrency.AtomicValue[int64]{},
 					}
 					c.soughtNodeID.Set(protocol.RandomNodeID())
 
