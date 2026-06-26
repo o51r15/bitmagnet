@@ -42,5 +42,6 @@ testem.log
 .DS_Store
 Thumbs.db
 
-# Local development log — never push
+# Local development log + handoff snapshot — never push
 DEVLOG.md
+HANDOFF.md
