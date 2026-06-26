@@ -3,6 +3,7 @@ package prowlarr
 import (
 	"context"
 
+	"github.com/bitmagnet-io/bitmagnet/internal/database/dao"
 	"github.com/bitmagnet-io/bitmagnet/internal/importer"
 	"github.com/bitmagnet-io/bitmagnet/internal/lazy"
 	"github.com/bitmagnet-io/bitmagnet/internal/worker"
@@ -13,6 +14,7 @@ import (
 type Params struct {
 	fx.In
 	Config   Config
+	Dao      lazy.Lazy[*dao.Query]
 	Importer lazy.Lazy[importer.Importer]
 	Logger   *zap.SugaredLogger
 }
@@ -27,6 +29,7 @@ func New(p Params) Result {
 	c := &crawler{
 		config:      p.Config,
 		client:      newClient(p.Config.URL, p.Config.APIKey),
+		dao:         p.Dao,
 		imp:         p.Importer,
 		logger:      p.Logger.Named("prowlarr"),
 		triggerChan: make(chan int, 10),
