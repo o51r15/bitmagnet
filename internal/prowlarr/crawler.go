@@ -181,9 +181,9 @@ func (c *crawler) loadLastSeen(indexerID int) time.Time {
 
 // saveLastSeen updates the high-water mark publishDate for an indexer.
 func (c *crawler) saveLastSeen(indexerID int, date time.Time) {
-	d, err := c.dao.Get()
+	d, err := c.db.Get()
 	if err != nil {
-		c.logger.Warnw("prowlarr: failed to get dao for state save", "error", err)
+		c.logger.Warnw("prowlarr: failed to get db for state save", "error", err)
 		return
 	}
 	result := d.Exec(
