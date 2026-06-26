@@ -1,9 +1,11 @@
 package prowlarr
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -18,10 +20,18 @@ type prowlarrClient struct {
 }
 
 func newClient(baseURL, apiKey string) *prowlarrClient {
+	// Force IPv4 to avoid IPv6 connectivity issues inside VPN namespaces
+	// where only an IPv4 exit exists (common with gluetun setups).
+	dialer := &net.Dialer{Timeout: 10 * time.Second}
+	transport := &http.Transport{
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			return dialer.DialContext(ctx, "tcp4", addr)
+		},
+	}
 	return &prowlarrClient{
 		baseURL:    strings.TrimRight(baseURL, "/"),
 		apiKey:     apiKey,
-		httpClient: &http.Client{Timeout: 30 * time.Second},
+		httpClient: &http.Client{Timeout: 30 * time.Second, Transport: transport},
 	}
 }
 
