@@ -7,11 +7,11 @@ import (
 	"time"
 
 	"github.com/bitmagnet-io/bitmagnet/internal/classifier"
-	"github.com/bitmagnet-io/bitmagnet/internal/database/dao"
 	"github.com/bitmagnet-io/bitmagnet/internal/importer"
 	"github.com/bitmagnet-io/bitmagnet/internal/lazy"
 	"github.com/bitmagnet-io/bitmagnet/internal/protocol"
 	"go.uber.org/zap"
+	"gorm.io/gorm"
 )
 
 const defaultCrawlInterval = time.Hour
@@ -23,7 +23,7 @@ type CrawlNowFunc func(indexerID int)
 type crawler struct {
 	config      Config
 	client      *prowlarrClient
-	dao         lazy.Lazy[*dao.Query]
+	db          lazy.Lazy[*gorm.DB]
 	imp         lazy.Lazy[importer.Importer]
 	logger      *zap.SugaredLogger
 	triggerChan chan int
@@ -163,13 +163,13 @@ func (c *crawler) crawlIndexer(ctx context.Context, indexerID int, indexerName s
 
 // loadLastSeen returns the last seen publishDate for an indexer, or zero time if unknown.
 func (c *crawler) loadLastSeen(indexerID int) time.Time {
-	d, err := c.dao.Get()
+	d, err := c.db.Get()
 	if err != nil {
-		c.logger.Warnw("prowlarr: failed to get dao for state load", "error", err)
+		c.logger.Warnw("prowlarr: failed to get db for state load", "error", err)
 		return time.Time{}
 	}
 	var lastSeen time.Time
-	row := d.DB().Raw(
+	row := d.Raw(
 		"SELECT last_seen_publish_date FROM prowlarr_indexer_state WHERE indexer_id = ?",
 		indexerID,
 	).Scan(&lastSeen)
@@ -186,7 +186,7 @@ func (c *crawler) saveLastSeen(indexerID int, date time.Time) {
 		c.logger.Warnw("prowlarr: failed to get dao for state save", "error", err)
 		return
 	}
-	result := d.DB().Exec(
+	result := d.Exec(
 		`INSERT INTO prowlarr_indexer_state (indexer_id, last_seen_publish_date)
 		VALUES (?, ?)
 		ON CONFLICT (indexer_id) DO UPDATE SET last_seen_publish_date = EXCLUDED.last_seen_publish_date

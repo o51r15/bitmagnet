@@ -3,18 +3,18 @@ package prowlarr
 import (
 	"context"
 
-	"github.com/bitmagnet-io/bitmagnet/internal/database/dao"
 	"github.com/bitmagnet-io/bitmagnet/internal/importer"
 	"github.com/bitmagnet-io/bitmagnet/internal/lazy"
 	"github.com/bitmagnet-io/bitmagnet/internal/worker"
 	"go.uber.org/fx"
 	"go.uber.org/zap"
+	"gorm.io/gorm"
 )
 
 type Params struct {
 	fx.In
 	Config   Config
-	Dao      lazy.Lazy[*dao.Query]
+	DB       lazy.Lazy[*gorm.DB]
 	Importer lazy.Lazy[importer.Importer]
 	Logger   *zap.SugaredLogger
 }
@@ -29,7 +29,7 @@ func New(p Params) Result {
 	c := &crawler{
 		config:      p.Config,
 		client:      newClient(p.Config.URL, p.Config.APIKey),
-		dao:         p.Dao,
+		db:          p.DB,
 		imp:         p.Importer,
 		logger:      p.Logger.Named("prowlarr"),
 		triggerChan: make(chan int, 10),
