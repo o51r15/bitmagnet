@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/bitmagnet-io/bitmagnet/internal/classifier"
 	"github.com/bitmagnet-io/bitmagnet/internal/database/dao"
 	"github.com/bitmagnet-io/bitmagnet/internal/model"
 	"github.com/bitmagnet-io/bitmagnet/internal/processor"
@@ -41,7 +42,8 @@ type Item struct {
 }
 
 type Info struct {
-	ID string
+	ID              string
+	ClassifierFlags classifier.Flags
 }
 
 type importer struct {
@@ -211,7 +213,8 @@ func (i *activeImport) persistItems(items ...Item) error {
 	}
 
 	job, jobErr := processor.NewQueueJob(processor.MessageParams{
-		InfoHashes: infoHashes,
+		InfoHashes:      infoHashes,
+		ClassifierFlags: i.info.ClassifierFlags,
 	}, model.QueueJobPriority(20))
 	if jobErr != nil {
 		return jobErr
