@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/bitmagnet-io/bitmagnet/internal/classifier"
+	"github.com/bitmagnet-io/bitmagnet/internal/database/dao"
 	"github.com/bitmagnet-io/bitmagnet/internal/importer"
 	"github.com/bitmagnet-io/bitmagnet/internal/lazy"
 	"github.com/bitmagnet-io/bitmagnet/internal/protocol"
@@ -22,6 +23,7 @@ type CrawlNowFunc func(indexerID int)
 type crawler struct {
 	config      Config
 	client      *prowlarrClient
+	dao         lazy.Lazy[*dao.Query]
 	imp         lazy.Lazy[importer.Importer]
 	logger      *zap.SugaredLogger
 	triggerChan chan int
@@ -84,11 +86,31 @@ func (c *crawler) runIndexerLoop(ctx context.Context, indexerID int, indexerName
 func (c *crawler) crawlIndexer(ctx context.Context, indexerID int, indexerName string, categories []int) {
 	c.logger.Infow("prowlarr: crawling indexer", "indexer_id", indexerID)
 
+	// Load high-water mark for this indexer
+	lastSeen := c.loadLastSeen(indexerID)
+
 	results, err := c.client.search(indexerID, categories)
 	if err != nil {
 		c.logger.Warnw("prowlarr: search failed", "indexer_id", indexerID, "error", err)
 		return
 	}
+
+	// Track the newest publishDate across all results for state update
+	var maxDate time.Time
+	for _, r := range results {
+		if r.PublishDate.After(maxDate) {
+			maxDate = r.PublishDate
+		}
+	}
+
+	// Filter to only results newer than last seen
+	var newResults []SearchResult
+	for _, r := range results {
+		if r.PublishDate.After(lastSeen) {
+			newResults = append(newResults, r)
+		}
+	}
+	results = newResults
 
 	imp, err := c.imp.Get()
 	if err != nil {
@@ -132,6 +154,46 @@ func (c *crawler) crawlIndexer(ctx context.Context, indexerID int, indexerName s
 	if closeErr := ai.Close(); closeErr != nil {
 		c.logger.Warnw("prowlarr: import close error", "indexer_id", indexerID, "error", closeErr)
 	}
+	if !maxDate.IsZero() {
+		c.saveLastSeen(indexerID, maxDate)
+	}
 	c.logger.Infow("prowlarr: crawl complete",
-		"indexer_id", indexerID, "imported", imported, "total_results", len(results))
+		"indexer_id", indexerID, "imported", imported, "new_results", len(results), "last_seen", maxDate)
+}
+
+// loadLastSeen returns the last seen publishDate for an indexer, or zero time if unknown.
+func (c *crawler) loadLastSeen(indexerID int) time.Time {
+	d, err := c.dao.Get()
+	if err != nil {
+		c.logger.Warnw("prowlarr: failed to get dao for state load", "error", err)
+		return time.Time{}
+	}
+	var lastSeen time.Time
+	row := d.DB().Raw(
+		"SELECT last_seen_publish_date FROM prowlarr_indexer_state WHERE indexer_id = ?",
+		indexerID,
+	).Scan(&lastSeen)
+	if row.Error != nil || row.RowsAffected == 0 {
+		return time.Time{}
+	}
+	return lastSeen
+}
+
+// saveLastSeen updates the high-water mark publishDate for an indexer.
+func (c *crawler) saveLastSeen(indexerID int, date time.Time) {
+	d, err := c.dao.Get()
+	if err != nil {
+		c.logger.Warnw("prowlarr: failed to get dao for state save", "error", err)
+		return
+	}
+	result := d.DB().Exec(
+		`INSERT INTO prowlarr_indexer_state (indexer_id, last_seen_publish_date)
+		VALUES (?, ?)
+		ON CONFLICT (indexer_id) DO UPDATE SET last_seen_publish_date = EXCLUDED.last_seen_publish_date
+		WHERE prowlarr_indexer_state.last_seen_publish_date < EXCLUDED.last_seen_publish_date`,
+		indexerID, date,
+	)
+	if result.Error != nil {
+		c.logger.Warnw("prowlarr: failed to save indexer state", "indexer_id", indexerID, "error", result.Error)
+	}
 }
