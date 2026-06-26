@@ -50,7 +50,7 @@ func (c *crawler) start(ctx context.Context) {
 		if !ok || !ic.Enabled {
 			continue
 		}
-		go c.runIndexerLoop(ctx, idx.ID, ic.Categories, defaultCrawlInterval)
+		go c.runIndexerLoop(ctx, idx.ID, idx.Name, ic.Categories, defaultCrawlInterval)
 	}
 
 	// On-demand trigger loop
@@ -60,15 +60,15 @@ func (c *crawler) start(ctx context.Context) {
 			case <-c.stopped:
 				return
 			case indexerID := <-c.triggerChan:
-				go c.crawlIndexer(ctx, indexerID, nil)
+				go c.crawlIndexer(ctx, indexerID, "", nil)
 			}
 		}
 	}()
 }
 
-func (c *crawler) runIndexerLoop(ctx context.Context, indexerID int, categories []int, interval time.Duration) {
+func (c *crawler) runIndexerLoop(ctx context.Context, indexerID int, indexerName string, categories []int, interval time.Duration) {
 	// Crawl immediately on start, then repeat on interval
-	c.crawlIndexer(ctx, indexerID, categories)
+	c.crawlIndexer(ctx, indexerID, indexerName, categories)
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
@@ -76,12 +76,12 @@ func (c *crawler) runIndexerLoop(ctx context.Context, indexerID int, categories 
 		case <-c.stopped:
 			return
 		case <-ticker.C:
-			c.crawlIndexer(ctx, indexerID, categories)
+			c.crawlIndexer(ctx, indexerID, indexerName, categories)
 		}
 	}
 }
 
-func (c *crawler) crawlIndexer(ctx context.Context, indexerID int, categories []int) {
+func (c *crawler) crawlIndexer(ctx context.Context, indexerID int, indexerName string, categories []int) {
 	c.logger.Infow("prowlarr: crawling indexer", "indexer_id", indexerID)
 
 	results, err := c.client.search(indexerID, categories)
@@ -115,6 +115,7 @@ func (c *crawler) crawlIndexer(ctx context.Context, indexerID int, categories []
 		}
 		if importErr := ai.Import(importer.Item{
 			Source:      source,
+			SourceName:  indexerName,
 			InfoHash:    id,
 			Name:        r.Title,
 			Size:        uint(r.Size),

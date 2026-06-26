@@ -21,6 +21,7 @@ type Importer interface {
 
 type Item struct {
 	Source          string
+	SourceName      string // display name; falls back to Source if empty
 	InfoHash        protocol.ID
 	Name            string
 	Size            uint
@@ -187,9 +188,13 @@ func (i *activeImport) persistItems(items ...Item) error {
 	for _, item := range items {
 		if _, ok1 := i.importedSources[item.Source]; !ok1 {
 			if _, ok2 := sourcesMap[item.Source]; !ok2 {
+				sourceName := item.SourceName
+				if sourceName == "" {
+					sourceName = item.Source
+				}
 				sources = append(sources, &model.TorrentSource{
 					Key:  item.Source,
-					Name: item.Source,
+					Name: sourceName,
 				})
 				sourcesMap[item.Source] = struct{}{}
 			}
@@ -223,7 +228,8 @@ func (i *activeImport) persistItems(items ...Item) error {
 	return i.dao.Transaction(func(tx *dao.Query) error {
 		if len(sources) > 0 {
 			if createSourcesErr := tx.TorrentSource.WithContext(i.ctx).Clauses(clause.OnConflict{
-				DoNothing: true,
+				Columns:   []clause.Column{{Name: "key"}},
+				DoUpdates: clause.AssignmentColumns([]string{"name"}),
 			}).CreateInBatches(sources, 100); createSourcesErr != nil {
 				return createSourcesErr
 			}
