@@ -89,11 +89,14 @@ func (c *prowlarrClient) getIndexers() ([]Indexer, error) {
 
 func (c *prowlarrClient) search(indexerID int, categories []int) ([]SearchResult, error) {
 	params := url.Values{}
-	params.Add("indexerIds[]", strconv.Itoa(indexerID))
+	// Prowlarr requires plain "indexerIds" and "categories" — bracket form
+	// (indexerIds[]) gets percent-encoded by url.Values and is silently ignored,
+	// causing all indexers to be searched instead of the specified one.
+	params.Add("indexerIds", strconv.Itoa(indexerID))
 	params.Set("query", "")
-	params.Set("limit", "100")
+	params.Set("limit", "25")
 	for _, cat := range categories {
-		params.Add("categories[]", strconv.Itoa(cat))
+		params.Add("categories", strconv.Itoa(cat))
 	}
 	body, err := c.get("search", params)
 	if err != nil {
