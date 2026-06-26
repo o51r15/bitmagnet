@@ -123,7 +123,8 @@
     "workers": {
       "dht_crawler": "Rastrejador DHT",
       "http_server": "Servidor HTTP",
-      "queue_server": "Servidor de cues"
+      "queue_server": "Servidor de cues",
+      "prowlarr_crawler": "Prowlarr crawler"
     }
   },
   "languages": {
@@ -214,7 +215,8 @@
     "jobs": "Tasques",
     "queues": "Cues",
     "torrents": "Torrents",
-    "visualize": "Visualitza"
+    "visualize": "Visualitza",
+    "prowlarr": "Prowlarr"
   },
   "torrents": {
     "classification": "Classificació",

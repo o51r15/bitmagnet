@@ -142,7 +142,8 @@
     "workers": {
       "dht_crawler": "Rastreador DHT",
       "http_server": "Servidor HTTP",
-      "queue_server": "Servidor de colas"
+      "queue_server": "Servidor de colas",
+      "prowlarr_crawler": "Prowlarr crawler"
     }
   },
   "languages": {
@@ -234,7 +235,8 @@
     "jobs": "Trabajos",
     "queues": "Colas",
     "torrents": "Torrents",
-    "visualize": "Visualizar"
+    "visualize": "Visualizar",
+    "prowlarr": "Prowlarr"
   },
   "torrents": {
     "classification": "Clasificación",

@@ -142,7 +142,8 @@
     "workers": {
       "dht_crawler": "DHT обходчик",
       "http_server": "HTTP сервер",
-      "queue_server": "Сервер очередей"
+      "queue_server": "Сервер очередей",
+      "prowlarr_crawler": "Prowlarr crawler"
     }
   },
   "languages": {
@@ -234,7 +235,8 @@
     "jobs": "Задания",
     "queues": "Очереди",
     "torrents": "Торренты",
-    "visualize": "Визуализация"
+    "visualize": "Визуализация",
+    "prowlarr": "Prowlarr"
   },
   "torrents": {
     "classification": "Классификация",

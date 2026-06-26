@@ -142,7 +142,8 @@
     "workers": {
       "dht_crawler": "DHT क्रॉलर",
       "http_server": "HTTP सर्वर",
-      "queue_server": "कतार सर्वर"
+      "queue_server": "कतार सर्वर",
+      "prowlarr_crawler": "Prowlarr crawler"
     }
   },
   "languages": {
@@ -234,7 +235,8 @@
     "jobs": "नौकरियां",
     "queues": "कतारें",
     "torrents": "टोरेंट्स",
-    "visualize": "दृश्य करें"
+    "visualize": "दृश्य करें",
+    "prowlarr": "Prowlarr"
   },
   "torrents": {
     "classification": "वर्गीकरण",

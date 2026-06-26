@@ -1,0 +1,58 @@
+<ng-container *transloco="let t">
+  <app-document-title [parts]="['Prowlarr']" />
+  <div class="prowlarr-container">
+    <h2>Prowlarr Indexers</h2>
+    @if (loading()) {
+      <div class="loading-container">
+        <mat-spinner diameter="40" />
+      </div>
+    } @else if (error()) {
+      <mat-card class="state-card">
+        <mat-card-content>
+          <mat-icon color="warn">error</mat-icon>
+          <span>Failed to load indexers.</span>
+        </mat-card-content>
+      </mat-card>
+    } @else if (sources().length === 0) {
+      <mat-card class="state-card">
+        <mat-card-content>
+          <mat-icon>info</mat-icon>
+          <span>
+            No Prowlarr indexers found. Configure at least one indexer in your
+            bitmagnet <code>config.yml</code> and ensure the
+            <code>prowlarr_crawler</code> worker is running.
+          </span>
+        </mat-card-content>
+      </mat-card>
+    } @else {
+      <div class="sources-grid">
+        @for (source of sources(); track source.key) {
+          <mat-card class="source-card">
+            <mat-card-header>
+              <mat-icon mat-card-avatar>rss_feed</mat-icon>
+              <mat-card-title>{{ source.name }}</mat-card-title>
+              <mat-card-subtitle>{{ source.key }}</mat-card-subtitle>
+            </mat-card-header>
+            <mat-card-content>
+              <p class="torrent-count">
+                <strong>{{ source.count }}{{ source.isEstimate ? "+" : "" }}</strong>
+                torrents
+              </p>
+            </mat-card-content>
+            <mat-card-actions>
+              <a
+                mat-button
+                color="primary"
+                [routerLink]="['/torrents']"
+                [queryParams]="getSearchParams(source.key)"
+              >
+                <mat-icon>search</mat-icon>
+                View Torrents
+              </a>
+            </mat-card-actions>
+          </mat-card>
+        }
+      </div>
+    }
+  </div>
+</ng-container>

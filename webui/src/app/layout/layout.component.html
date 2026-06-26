@@ -29,6 +29,16 @@
           <mat-icon>dashboard</mat-icon>
           {{ t("routes.dashboard") }}
         </a>
+        <a
+          mat-button
+          routerLink="prowlarr"
+          #linkProwlarr="routerLinkActive"
+          routerLinkActive
+          [class]="linkProwlarr.isActive ? 'active' : ''"
+        >
+          <mat-icon>rss_feed</mat-icon>
+          {{ t("routes.prowlarr") }}
+        </a>
       </nav>
     } @else {
       <h1>
@@ -45,6 +55,16 @@
         [matTooltip]="t('routes.dashboard')"
       >
         <mat-icon>dashboard</mat-icon>
+      </button>
+      <button
+        mat-icon-button
+        routerLink="prowlarr"
+        #linkProwlarr="routerLinkActive"
+        routerLinkActive
+        [class]="linkProwlarr.isActive ? 'active' : ''"
+        [matTooltip]="t('routes.prowlarr')"
+      >
+        <mat-icon>rss_feed</mat-icon>
       </button>
     }
     <span class="spacer"></span>

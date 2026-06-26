@@ -142,7 +142,8 @@
     "workers": {
       "dht_crawler": "DHT сканер",
       "http_server": "HTTP сервер",
-      "queue_server": "Сервер черги"
+      "queue_server": "Сервер черги",
+      "prowlarr_crawler": "Prowlarr crawler"
     }
   },
   "languages": {
@@ -234,7 +235,8 @@
     "jobs": "Завдання",
     "queues": "Черги",
     "torrents": "Торренти",
-    "visualize": "Візуалізувати"
+    "visualize": "Візуалізувати",
+    "prowlarr": "Prowlarr"
   },
   "torrents": {
     "classification": "Класифікація",
