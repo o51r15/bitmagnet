@@ -139,7 +139,8 @@
     "workers": {
       "dht_crawler": "DHT crawler",
       "http_server": "HTTP server",
-      "queue_server": "Queue server"
+      "queue_server": "Queue server",
+      "prowlarr_crawler": "Prowlarr crawler"
     }
   },
   "languages": {
@@ -231,7 +232,8 @@
     "jobs": "Jobs",
     "queues": "Queues",
     "torrents": "Torrents",
-    "visualize": "Visualize"
+    "visualize": "Visualize",
+    "prowlarr": "Prowlarr"
   },
   "torrents": {
     "classification": "Classification",

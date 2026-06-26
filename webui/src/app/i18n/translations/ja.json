@@ -142,7 +142,8 @@
     "workers": {
       "dht_crawler": "DHTクローラー",
       "http_server": "HTTPサーバー",
-      "queue_server": "キューサーバー"
+      "queue_server": "キューサーバー",
+      "prowlarr_crawler": "Prowlarr crawler"
     }
   },
   "languages": {
@@ -234,7 +235,8 @@
     "jobs": "ジョブ",
     "queues": "キュー",
     "torrents": "トレント",
-    "visualize": "可視化"
+    "visualize": "可視化",
+    "prowlarr": "Prowlarr"
   },
   "torrents": {
     "classification": "分類",

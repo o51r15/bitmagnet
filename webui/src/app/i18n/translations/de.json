@@ -142,7 +142,8 @@
     "workers": {
       "dht_crawler": "DHT-Crawler",
       "http_server": "HTTP-Server",
-      "queue_server": "Warteschlangen-Server"
+      "queue_server": "Warteschlangen-Server",
+      "prowlarr_crawler": "Prowlarr crawler"
     }
   },
   "languages": {
@@ -234,7 +235,8 @@
     "jobs": "Aufgaben",
     "queues": "Warteschlangen",
     "torrents": "Torrents",
-    "visualize": "Visualisieren"
+    "visualize": "Visualisieren",
+    "prowlarr": "Prowlarr"
   },
   "torrents": {
     "classification": "Klassifizierung",

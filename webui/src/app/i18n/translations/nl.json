@@ -142,7 +142,8 @@
     "workers": {
       "dht_crawler": "DHT crawler",
       "http_server": "HTTP server",
-      "queue_server": "Wachtrijserver"
+      "queue_server": "Wachtrijserver",
+      "prowlarr_crawler": "Prowlarr crawler"
     }
   },
   "languages": {
@@ -234,7 +235,8 @@
     "jobs": "Taken",
     "queues": "Wachtrijen",
     "torrents": "Torrents",
-    "visualize": "Visualiseren"
+    "visualize": "Visualiseren",
+    "prowlarr": "Prowlarr"
   },
   "torrents": {
     "classification": "Classificatie",

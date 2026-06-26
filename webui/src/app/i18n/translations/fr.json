@@ -142,7 +142,8 @@
     "workers": {
       "dht_crawler": "Explorateur DHT",
       "http_server": "Serveur HTTP",
-      "queue_server": "Serveur de file d'attente"
+      "queue_server": "Serveur de file d'attente",
+      "prowlarr_crawler": "Prowlarr crawler"
     }
   },
   "languages": {
@@ -234,7 +235,8 @@
     "jobs": "Tâches",
     "queues": "Files d'attente",
     "torrents": "Torrents",
-    "visualize": "Visualiser"
+    "visualize": "Visualiser",
+    "prowlarr": "Prowlarr"
   },
   "torrents": {
     "classification": "Classification",

@@ -142,7 +142,8 @@
     "workers": {
       "dht_crawler": "زاحف DHT",
       "http_server": "خادم HTTP",
-      "queue_server": "خادم الطابور"
+      "queue_server": "خادم الطابور",
+      "prowlarr_crawler": "Prowlarr crawler"
     }
   },
   "languages": {
@@ -234,7 +235,8 @@
     "jobs": "الوظائف",
     "queues": "الطوابير",
     "torrents": "التورنت",
-    "visualize": "تصور"
+    "visualize": "تصور",
+    "prowlarr": "Prowlarr"
   },
   "torrents": {
     "classification": "التصنيف",

@@ -142,7 +142,8 @@
     "workers": {
       "dht_crawler": "DHT爬虫",
       "http_server": "HTTP服务器",
-      "queue_server": "队列服务器"
+      "queue_server": "队列服务器",
+      "prowlarr_crawler": "Prowlarr crawler"
     }
   },
   "languages": {
@@ -234,7 +235,8 @@
     "jobs": "任务",
     "queues": "队列",
     "torrents": "种子",
-    "visualize": "可视化"
+    "visualize": "可视化",
+    "prowlarr": "Prowlarr"
   },
   "torrents": {
     "classification": "分类",

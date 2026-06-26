@@ -142,7 +142,8 @@
     "workers": {
       "dht_crawler": "DHT tarayıcı",
       "http_server": "HTTP sunucusu",
-      "queue_server": "Kuyruk sunucusu"
+      "queue_server": "Kuyruk sunucusu",
+      "prowlarr_crawler": "Prowlarr crawler"
     }
   },
   "languages": {
@@ -234,7 +235,8 @@
     "jobs": "Görevler",
     "queues": "Kuyruklar",
     "torrents": "Torrentler",
-    "visualize": "Görselleştir"
+    "visualize": "Görselleştir",
+    "prowlarr": "Prowlarr"
   },
   "torrents": {
     "classification": "Sınıflandırma",
