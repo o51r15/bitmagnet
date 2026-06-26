@@ -1,8 +1,6 @@
 package prowlarr
 
 import (
-	"time"
-
 	"github.com/bitmagnet-io/bitmagnet/internal/model"
 )
 
@@ -17,11 +15,11 @@ type Config struct {
 }
 
 // IndexerConfig defines crawl settings for one Prowlarr indexer.
+// Crawl interval is fixed at defaultCrawlInterval (1h) for all indexers.
 type IndexerConfig struct {
-	ID         int           `yaml:"id"`
-	Enabled    bool          `yaml:"enabled"`
-	Interval   time.Duration `yaml:"interval"`   // 0 = defaultCrawlInterval
-	Categories []int         `yaml:"categories"` // Newznab IDs; empty = all
+	ID         int   `yaml:"id"`
+	Enabled    bool  `yaml:"enabled"`
+	Categories []int `yaml:"categories"` // Newznab IDs; empty = all
 }
 
 // NewDefaultConfig returns an empty config (integration disabled until configured).

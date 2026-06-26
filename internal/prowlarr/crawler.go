@@ -50,11 +50,7 @@ func (c *crawler) start(ctx context.Context) {
 		if !ok || !ic.Enabled {
 			continue
 		}
-		interval := ic.Interval
-		if interval == 0 {
-			interval = defaultCrawlInterval
-		}
-		go c.runIndexerLoop(ctx, idx.ID, ic.Categories, interval)
+		go c.runIndexerLoop(ctx, idx.ID, ic.Categories, defaultCrawlInterval)
 	}
 
 	// On-demand trigger loop
