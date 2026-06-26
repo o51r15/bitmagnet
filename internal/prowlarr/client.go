@@ -94,7 +94,7 @@ func (c *prowlarrClient) search(indexerID int, categories []int) ([]SearchResult
 	// causing all indexers to be searched instead of the specified one.
 	params.Add("indexerIds", strconv.Itoa(indexerID))
 	params.Set("query", "")
-	params.Set("limit", "25")
+	params.Set("limit", "100")
 	for _, cat := range categories {
 		params.Add("categories", strconv.Itoa(cat))
 	}
