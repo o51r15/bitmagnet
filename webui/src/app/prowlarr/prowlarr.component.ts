@@ -16,6 +16,13 @@ interface ProwlarrSource {
   isEstimate: boolean;
 }
 
+interface TorrentSourceAgg {
+  value: string;
+  label: string;
+  count: number;
+  isEstimate: boolean;
+}
+
 const PROWLARR_SOURCES_QUERY = gql`
   query ProwlarrSources {
     torrentContent {
@@ -57,12 +64,7 @@ export class ProwlarrComponent implements OnInit {
         torrentContent: {
           search: {
             aggregations: {
-              torrentSource: Array<{
-                value: string;
-                label: string;
-                count: number;
-                isEstimate: boolean;
-              }>;
+              torrentSource?: TorrentSourceAgg[];
             };
           };
         };
@@ -73,10 +75,17 @@ export class ProwlarrComponent implements OnInit {
       .subscribe({
         next: (result) => {
           const all =
-            result.data?.torrentContent?.search?.aggregations
-              ?.torrentSource ?? [];
+            result.data?.torrentContent?.search?.aggregations?.torrentSource ??
+            [];
           this.sources.set(
-            all.filter((s) => s.value.startsWith("prowlarr-")),
+            all
+              .filter((s) => s.value.startsWith("prowlarr-"))
+              .map((s) => ({
+                key: s.value,
+                name: s.label,
+                count: s.count,
+                isEstimate: s.isEstimate,
+              })),
           );
           this.loading.set(false);
         },

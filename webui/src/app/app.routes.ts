@@ -88,9 +88,7 @@ export const routes: Routes = [
   {
     path: "prowlarr",
     loadComponent: () =>
-      import("./prowlarr/prowlarr.component").then(
-        (c) => c.ProwlarrComponent,
-      ),
+      import("./prowlarr/prowlarr.component").then((c) => c.ProwlarrComponent),
   },
   {
     path: "**",
