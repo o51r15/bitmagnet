@@ -1,3 +1,13 @@
+# build webui (Angular frontend)
+FROM --platform=$BUILDPLATFORM node:20-alpine AS webui-builder
+WORKDIR /webui
+# Cache npm deps
+COPY webui/package.json webui/package-lock.json ./
+RUN npm ci
+# Build the Angular app
+COPY webui/ ./
+RUN npm run build
+
 # build app
 FROM --platform=$BUILDPLATFORM golang:1.23.6-alpine3.20 AS app-builder
 RUN apk add --no-cache git tzdata
@@ -12,12 +22,16 @@ RUN go mod download
 
 COPY . ./
 
+# Replace any committed webui/dist with the freshly built frontend
+RUN rm -rf webui/dist
+COPY --from=webui-builder /webui/dist ./webui/dist
+
 ARG VERSION=dev
 ARG REVISION=dev
 ARG BUILDTIME
 ARG TARGETOS TARGETARCH TARGETVARIANT
 
-RUN --network=none --mount=target=. \
+RUN --network=none \
 export GOOS=$TARGETOS; \
 export GOARCH=$TARGETARCH; \
 [[ "$GOARCH" == "amd64" ]] && export GOAMD64=$TARGETVARIANT; \
