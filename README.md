@@ -23,57 +23,74 @@ ghcr.io/o51r15/bitmagnet:latest
 
 Poll DHT and configured indexers continuously and keep only recent content — for example, the last 90 days. Older torrents and unseeded content are purged automatically on a schedule.
 
-**Good for:** Users who want a fast local search index of currently active torrents without committing to unlimited storage growth. A recent cache gives you search results for content that's actually alive and seeded right now.
+**Good for:** Users who want a fast local search index of currently active torrents without committing to unlimited storage growth.
 
-**Key config:** Set `db_trim.sources.dht.max_age_days: 90` and `db_trim.sources.dht.purge_unseeded_after_hours: 40`. The unseeded purge delay gives new torrents time to establish seeders before being considered dead.
+> **Status:** DHT crawling and Prowlarr indexer crawling are fully functional today. Automatic age-based trim and unseeded purge are **planned for V3** and not yet implemented.
 
 ### 2 — Full backfill (hoarder mode)
 
-Crawl DHT and indexers continuously with no age limit. Build a permanent local database of every torrent you can locate. Combined with Prowlarr indexer integration, this creates a resilient offline cache — torrents remain searchable even when the original indexer goes offline.
+Crawl DHT and indexers continuously with no age limit. Build a permanent local database of every torrent you can locate. Combined with Prowlarr integration, this creates a resilient offline cache — torrents remain searchable even when the original indexer goes offline.
 
-**Good for:** Users who want maximum coverage and are willing to manage storage growth manually or via the trim tools.
+**Good for:** Users who want maximum coverage and are willing to manage storage growth manually.
 
-**Key config:** Leave trim disabled (default). Add as many Prowlarr indexers as you have access to.
+> **Status:** Fully functional today. Prowlarr integration is live. Automatic trim tools to manage growth are **planned for V3**.
 
 ---
 
 ## Key features
 
-### Stability (all upstream issues addressed)
+### Stability fixes — all complete
 - **Queue index fix** — eliminates the primary DB memory pressure that caused 24-hour crash cycles ([#496](https://github.com/bitmagnet-io/bitmagnet/issues/496))
 - **DHT network recovery** — self-healing ktable monitor, no more permanent stalls after network interruption ([#359](https://github.com/bitmagnet-io/bitmagnet/issues/359))
 - **UDP connection cap** — global semaphore prevents goroutine storms under high scaling factors
 - **Queue backpressure** — configurable depth limit stops the queue growing unboundedly under TMDB load
 - **Bootstrap node fixes** — updated DHT bootstrap nodes, removed stale/unreliable entries
 - **BEP-47 padding exclusion** — synthetic padding files no longer bloat the torrent_files table
-- **Disk guardian** — optional script pauses crawling at configurable disk usage threshold
+- **Disk guardian** — optional script pauses crawling at a configurable disk usage threshold
 
-### Prowlarr integration
+### Prowlarr integration — live
 Connect bitmagnet to a running [Prowlarr](https://prowlarr.com) instance to crawl configured indexers on a schedule. Imported torrents persist in the local database and remain searchable even when the source indexer goes offline.
 
 ```yaml
 # config.yml
 prowlarr:
-  url: http://prowlarr:9696
-  api_key: your_key_here
+  url: http://your-prowlarr:9696
+  api_key: your_api_key_here
   indexers:
-    - id: 20    # The Pirate Bay
+    - id: 20        # The Pirate Bay
+      enabled: true
+      categories:   # Newznab category IDs; omit to crawl all categories
+        - 2000      # Movies
+        - 5000      # TV
+    - id: 74        # 1337x
       enabled: true
       categories:
-        - Movies
-        - TV
-    - id: 74    # 1337x
-      enabled: true
-      categories:
-        - Movies
-        - TV
-        - Audio
+        - 2000      # Movies
+        - 5000      # TV
+        - 3000      # Audio
 ```
 
-**Note:** Not all Prowlarr indexers return torrent hashes. Private trackers in particular often omit them. Check your first crawl log — if `imported: 0` but `new_results: 35+`, that indexer isn't compatible. Public trackers like The Pirate Bay and 1337x work reliably.
+**Newznab category reference:**
 
-### DB size management *(coming in V3)*
-Configurable age-based trim and dead torrent purge, per source. Keep Prowlarr content indefinitely while trimming DHT to a rolling window. Unseeded torrent purge with a configurable grace period so new uploads have time to establish seeders before being considered dead.
+| ID | Category |
+|---|---|
+| 2000 | Movies |
+| 5000 | TV |
+| 3000 | Audio / Music |
+| 7000 | Books / E-Books |
+| 4000 | PC / Software |
+| 1000 | Console / Games |
+| 6000 | XXX |
+| 8000 | Other |
+
+**Note:** Not all Prowlarr indexers return torrent hashes. Private trackers in particular often omit them. Check your first crawl log — if `imported: 0` alongside `new_results: 35+`, that indexer is not compatible. Public trackers like The Pirate Bay and 1337x work reliably.
+
+### DB size management — planned (V3)
+Configurable age-based trim and dead torrent purge, per source. Designed to support both use cases above:
+
+- Keep Prowlarr-sourced content indefinitely while trimming DHT to a rolling window
+- Purge unseeded torrents after a configurable grace period (proposed default: 40 hours after first seen — long enough for new uploads to establish seeders)
+- Dry-run mode to preview what would be removed before enabling
 
 ---
 
@@ -83,7 +100,7 @@ Configurable age-based trim and dead torrent purge, per source. Keep Prowlarr co
 
 **TMDB API key** — bitmagnet uses [The Movie Database](https://www.themoviedb.org) for content classification. Get a free key at [themoviedb.org/settings/api](https://www.themoviedb.org/settings/api).
 
-**Prowlarr** *(optional)* — only needed if you want indexer crawling. Any Prowlarr instance reachable from the bitmagnet container works.
+**Prowlarr** *(optional)* — only needed for indexer crawling. Any Prowlarr instance reachable from the bitmagnet container works.
 
 ---
 
@@ -112,13 +129,13 @@ log:
 # Optional: Prowlarr integration
 # prowlarr:
 #   url: http://your-prowlarr:9696
-#   api_key: your_api_key
+#   api_key: your_api_key_here
 #   indexers:
-#     - id: 20
+#     - id: 20          # The Pirate Bay
 #       enabled: true
 #       categories:
-#         - Movies
-#         - TV
+#         - 2000        # Movies
+#         - 5000        # TV
 EOF
 ```
 
@@ -144,7 +161,7 @@ docker compose up -d
 
 ### Step 3 — Enable Prowlarr crawler *(optional)*
 
-Add `--keys=prowlarr_crawler` to the bitmagnet `command:` block in your compose file and add your Prowlarr config to `config.yml`. The Prowlarr tab will appear in the web UI once the first crawl completes.
+Add `--keys=prowlarr_crawler` to the bitmagnet `command:` block in your compose file, then add your Prowlarr config to `config.yml`.
 
 ```yaml
 command:
@@ -155,6 +172,8 @@ command:
   - --keys=dht_crawler
   - --keys=prowlarr_crawler   # add this line
 ```
+
+The Prowlarr tab will appear in the web UI once the first crawl completes.
 
 ---
 
@@ -172,7 +191,7 @@ services:
 
   postgres:
     networks:
-      - bitmagnet_internal   # postgres is on the bridge, NOT behind gluetun
+      - bitmagnet_internal   # postgres on the bridge, NOT behind gluetun
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U bitmagnet -d bitmagnet"]
       interval: 10s
@@ -228,7 +247,7 @@ For a **Raspberry Pi (4GB)**, reduce to:
 
 ## Relationship to upstream
 
-All stability fixes in this fork are intended to be upstreamable. Where fixes have been merged upstream they will be dropped from this fork on the next rebase to avoid drift.
+All stability fixes in this fork are intended to be upstreamable. Where fixes are merged upstream they will be dropped from this fork on the next rebase to avoid drift.
 
 Upstream repository: https://github.com/bitmagnet-io/bitmagnet
 Upstream website: https://bitmagnet.io
