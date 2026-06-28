@@ -83,5 +83,5 @@ jobs:
         env:
           POSTGRES_PASSWORD: postgres
       - name: Check nothing changed
-        # excluding the 3rdpartylicenses file in a horrible hack:
-        run: git diff --exit-code -- . ':(exclude)webui/dist/bitmagnet/3rdpartylicenses.txt'
+        # excluding webui/dist as it is now built fresh in ci.Dockerfile rather than committed:
+        run: git diff --exit-code -- . ':(exclude)webui/dist/'
