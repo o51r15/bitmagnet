@@ -410,3 +410,101 @@ Tier 4 — Prowlarr lookup (V2 Road 1)
 1. **V2 Road 3 — RSS crawler** — standalone worker, no external dependencies, highest ROI
 2. **V2 Road 2 — Prowlarr crawl** — requires Prowlarr instance, builds on RSS patterns
 3. **V2 Road 1 — Prowlarr lookup** — most complex (cache, throttle, classifier integration)
+
+---
+
+## V3 — DB Size Management (Planned)
+
+> Addresses a common community concern about database growth under sustained DHT crawling.
+> Not a blocker for most users but important for long-running deployments on limited storage.
+
+### Background
+
+The DHT crawler is indiscriminate by design — it indexes everything the network surfaces,
+including torrents that died years ago with zero seeders. Over time this produces a DB that
+grows without bound. Two categories of data are the main culprits:
+
+1. **Old torrents** — content indexed months or years ago that no one is seeding
+2. **Dead torrents** — torrents with zero seeders that have never recovered
+
+The existing disk guardian script (M0.6) is a blunt instrument — it pauses the crawler
+when disk is nearly full. This feature addresses DB growth proactively before it becomes
+a crisis.
+
+### Feature 1 — Age-based trim (per source)
+
+Remove torrents from a given source that were first seen more than N days ago. Configurable
+independently per source so users can apply different retention policies to DHT vs Prowlarr
+vs RSS content.
+
+```yaml
+db_trim:
+  sources:
+    dht:
+      max_age_days: 180      # remove DHT torrents older than 6 months
+    prowlarr-20:
+      max_age_days: 0        # 0 = never trim (keep all Prowlarr content)
+    default:
+      max_age_days: 0        # default: never trim unless explicitly set
+```
+
+Runs as a scheduled background worker (e.g. daily at low-traffic hours).
+Only removes torrents where ALL sources are past their max_age — a torrent
+indexed by both DHT and Prowlarr is only trimmed when both sources' rules apply.
+
+### Feature 2 — Dead torrent purge (DHT-specific)
+
+Remove torrents sourced from DHT that have had zero seeders for longer than N days.
+Seeders/leechers are tracked in `torrents_torrent_sources` and updated each time
+a torrent is re-encountered by the DHT crawler.
+
+```yaml
+db_trim:
+  sources:
+    dht:
+      purge_unseeded_after_days: 30   # remove if 0 seeders for 30+ days
+```
+
+This is the highest-leverage DB size reduction for most users — the DHT surfaces
+enormous numbers of dead torrents that will never be active again. A 30-day
+unseeded window is conservative enough to avoid removing temporarily offline
+content while eliminating genuine ghost torrents.
+
+### Feature 3 — Prowlarr resilience preservation
+
+When trimming, torrents that exist in a Prowlarr source should be exempt from
+DHT age/dead-purge rules. This preserves the key selling point of the Prowlarr
+integration: content remains searchable in bitmagnet even when the original
+indexer goes offline.
+
+```yaml
+db_trim:
+  protect_prowlarr_sources: true   # default: true
+```
+
+### Implementation notes
+
+- Trim runs as a low-priority background worker on a configurable schedule
+- Deletes cascade via existing FK constraints (torrent_files, torrent_contents,
+  torrents_torrent_sources all have ON DELETE CASCADE)
+- Worker logs rows removed per source per run for observability
+- Dry-run mode for users to preview what would be removed before committing
+- Migration needed: add `last_seen_at` index on torrents_torrent_sources if not
+  already present (needed for efficient dead-torrent queries)
+
+### Config summary
+
+```yaml
+db_trim:
+  enabled: true
+  schedule: "0 3 * * *"          # run daily at 3am
+  protect_prowlarr_sources: true  # never trim if a Prowlarr source exists
+  dry_run: false
+  sources:
+    dht:
+      max_age_days: 180
+      purge_unseeded_after_days: 30
+    default:
+      max_age_days: 0             # keep forever unless specified
+```
+
