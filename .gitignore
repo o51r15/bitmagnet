@@ -45,3 +45,5 @@ Thumbs.db
 # Local development log + handoff snapshot — never push
 DEVLOG.md
 HANDOFF.md
+
+WIKI_NOTES.md
