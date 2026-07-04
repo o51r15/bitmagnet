@@ -26,10 +26,10 @@ Low-risk, no Go code required. Estimated effort: 1 session.
 
 | # | Fix | Source | Status |
 |---|---|---|---|
-| 🔲 | Add `TZ=UTC` to compose — fixes misleading "last torrent found N hours ago" display | Issue [#485](https://github.com/bitmagnet-io/bitmagnet/issues/485) | Planned |
-| 🔲 | Add `ulimits: nofile: 65535` to bitmagnet container — raises fd limit to prevent silent UDP socket exhaustion | Issue [#348](https://github.com/bitmagnet-io/bitmagnet/issues/348) | Planned |
-| 🔲 | Add `processor.concurrency: 2` to `config/config.yml` — now safe post index-fix; improves queue drain rate | Upstream FAQ + our fix | Planned |
-| 🔲 | Add `config/config.yml` to the repo with documented safe defaults | Deployment hygiene | Planned |
+| ✅ | Add `TZ=UTC` to compose — fixes misleading "last torrent found N hours ago" display | Issue [#485](https://github.com/bitmagnet-io/bitmagnet/issues/485) | Done (6c6016d) |
+| ✅ | Add `ulimits: nofile: 65535` to bitmagnet container — raises fd limit to prevent silent UDP socket exhaustion | Issue [#348](https://github.com/bitmagnet-io/bitmagnet/issues/348) | Done (6c6016d) |
+| ✅ | Add `processor.concurrency: 2` to `config/config.yml` — now safe post index-fix; improves queue drain rate | Upstream FAQ + our fix | Done (6c6016d) |
+| ✅ | Add `config/config.yml` to the repo with documented safe defaults | Deployment hygiene | Done (6c6016d) |
 
 ---
 
@@ -200,8 +200,10 @@ changes — it can be implemented as a Docker healthcheck script and documented 
 
 ## V2 Milestone 1 — Prowlarr Crawler (Scoped)
 
-> Status: Designed, not yet implemented.
-> Design session: 2026-06-25. Full spec in DEVLOG.md Session 5.
+> **Status: PARTIALLY COMPLETE** — backend crawler live on Pi and Optiplex.
+> Angular UI page (Prowlarr nav link + indexer cards) deployed.
+> GraphQL and Crawl Now button deferred to V2.2. Security/correctness fixes tracked in V2.1.
+> Design: DEVLOG Sessions 5, 6, 9. Implementation: Sessions 10, 12. Code review: Session 13.
 
 ### What it does
 
@@ -247,18 +249,117 @@ prowlarr:
 
 ### Implementation components
 
-| Component | Location | Notes |
+| Component | Location | Status |
 |---|---|---|
-| Prowlarr API client | `internal/prowlarr/client.go` | Wraps indexer list + search endpoints |
-| Config struct | `internal/prowlarr/config.go` | Indexer list, schedule, category map |
-| Crawl worker | `internal/prowlarr/crawler.go` | Fetch, build models, upsert |
-| fx wiring | `internal/prowlarr/factory.go` | |
-| Worker key | `prowlarr_crawler` | Registered alongside dht_crawler |
-| Migration | `migrations/00023_prowlarr_source.sql` | Index on torrents_torrent_source.source |
-| UI route | `/prowlarr` | New Angular route |
-| UI component | `webui/.../prowlarr/` | Dropdown, list, crawl button |
-| GraphQL query | `prowlarrIndexers` | Returns crawled indexers + stats |
+| Prowlarr API client | `internal/prowlarr/client.go` | ✅ Done — hardening fixes in V2.1 |
+| Config struct | `internal/prowlarr/config.go` | ✅ Done |
+| Crawl worker | `internal/prowlarr/crawler.go` | ✅ Done — correctness fixes in V2.1 |
+| fx wiring | `internal/prowlarr/factory.go` | ✅ Done |
+| Worker key | `prowlarr_crawler` | ✅ Done (adec8a7) |
+| ClassifierFlags in importer | `internal/importer/importer.go` | ✅ Done (fbae238) |
+| Migration 00023 source index | `migrations/00023_prowlarr_source_index.sql` | ✅ Done (43d5067) |
+| Migration 00024 indexer state | `migrations/00024_prowlarr_indexer_state.sql` | ✅ Done |
+| UI route | `/prowlarr` | ✅ Done |
+| UI component | `webui/.../prowlarr/` | ✅ Done (067bcbb) |
+| GraphQL query + Crawl Now mutation | `graphql/schema/prowlarr.graphqls` | 🟥 Deferred → V2.2 |
 
+
+
+---
+
+## V2.1 — Prowlarr Security & Correctness Hardening
+
+> **Status: PLANNED** — 4 commits, all self-contained. Findings from Session 13 code review.
+> Do before adding more indexers to any deployment.
+
+### Commit A — client.go hardening (RED — security)
+
+| # | File | Fix |
+|---|---|---|
+| 1 | `prowlarr/client.go:67` | Move API key from URL query param to `X-Api-Key` header. Refactor `get()` to build `*http.Request`. Prevents key appearing in Prowlarr/proxy access logs. |
+| 2 | `prowlarr/client.go:75` | Wrap `io.ReadAll` with `io.LimitReader(resp.Body, 32MB)`. Prevents memory exhaustion from large/adversarial responses. |
+| 3 | `ci.Dockerfile:39` | Pin `FROM alpine:latest` → `FROM alpine:3.20`. Prevents non-reproducible builds. Matches local Dockerfile. |
+
+### Commit B — crawler.go correctness (ORANGE)
+
+| # | File | Fix |
+|---|---|---|
+| 4 | `prowlarr/crawler.go:32` | Add startup retry loop: if `getIndexers()` fails, retry every 60s. Currently crawler dies permanently if Prowlarr is down at startup. |
+| 5 | `prowlarr/crawler.go:59` | On-demand trigger passes `name=""` and `categories=nil`. Add `indexerMeta` map on struct, populated at startup, looked up in trigger handler. |
+| 6 | `prowlarr/crawler.go:130` | `uint(r.Size)` silently overflows on negative values. Add `if r.Size > 0` guard. |
+
+### Commit C — misc housekeeping (ORANGE + YELLOW)
+
+| # | File | Fix |
+|---|---|---|
+| 7 | `httpserver/config.go:59` | `CORS Debug: true` in default config logs every request to stderr. Change to `false`. |
+| 8 | `scripts/disk-check.sh:36` | `docker stop` uses 10s grace period, returns 0 even when container wasn't running. Change to `docker stop -t 30` + `docker inspect` state confirm. |
+| 9 | `.github/workflows/codeql.yml` | Deprecated `@v2` CodeQL actions → `@v3`. |
+| 10 | `scripts/disk-check.sh:18` | Hardcoded deployment paths. Add `BITMAGNET_DATA_DIR` and `BITMAGNET_CONTAINER_NAME` env-var overrides. |
+| lint | `prowlarr.component.html` | Fix prettier lint warning (CI noise, non-blocking). |
+
+### Awareness items — no code change needed
+
+| # | Note |
+|---|---|
+| 11 | GraphQL introspection + playground always on. Fine for home server; flag if port 3333 ever goes public. |
+| 12 | `dhtcrawler/factory.go` — inherited `// todo: Fix! //nolint:contextcheck` upstream debt. |
+| 13 | `internal/lazy/lazy.go` — error caching on failed lazy init is by-design. Document in deployment notes. |
+
+
+---
+
+## V2.2 — Prowlarr Completion
+
+> **Status: PLANNED** — blocked on gqlgen execution problem. Unlocks Crawl Now button.
+
+### GraphQL additions
+
+gqlgen does not run in CI or via Desktop Commander (Go not in PATH).
+Options:
+- Run via Docker: `docker run --rm -v <repo>:/src -w /src golang:1.23.6 go run github.com/99designs/gqlgen generate`
+- Manually edit `internal/gql/gql.gen.go` (24k lines — risky)
+
+New schema file `graphql/schema/prowlarr.graphqls`:
+```graphql
+type ProwlarrQuery {
+  indexers: [ProwlarrIndexer!]!
+}
+type ProwlarrIndexer {
+  id:            Int!
+  name:          String!
+  enabled:       Boolean!
+  lastCrawledAt: DateTime
+  torrentCount:  Int!
+}
+type ProwlarrMutation {
+  crawl(indexerIds: [Int!]!): Void
+}
+```
+Root additions: `prowlarr: ProwlarrQuery!` and `prowlarr: ProwlarrMutation!`
+
+`crawl` mutation sends indexer IDs to `CrawlNowFn` (already exported from prowlarr/factory.go).
+`torrentCount` resolved by COUNT on `torrents_torrent_sources WHERE source = 'prowlarr-<id>'`.
+
+### Per-indexer crawl interval
+
+`IndexerConfig.Interval` was removed (e7a784f) because mapstructure has no
+`StringToTimeDurationHookFunc` for fields inside a `[]struct` slice.
+
+Fix: add hook to `internal/config/config.go` decoder:
+```go
+mapstructure.ComposeDecodeHookFunc(
+    mapstructure.StringToTimeDurationHookFunc(),
+    // ... existing hooks
+)
+```
+Then restore `Interval time.Duration` to `IndexerConfig`. All indexers currently use `defaultCrawlInterval = 1h`.
+
+### Startup hash compatibility check
+
+At startup, fire a limit=1 test search per configured indexer. If no `infoHash` is returned,
+log `WARN` and skip that indexer entirely. Prevents silent zero-import crawls.
+Confirmed broken indexers from live testing (Session 10): Torrenting (id:70), LimeTorrents (id:15).
 
 ---
 
