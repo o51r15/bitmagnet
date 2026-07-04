@@ -52,7 +52,7 @@ func NewDefaultConfig() Config {
 	return Config{
 		LocalAddress: ":3333",
 		GinMode:      "release",
-			Cors: CorsConfig{
+		Cors: CorsConfig{
 			AllowedOrigins: []string{"*"},
 			AllowedHeaders: []string{"*"},
 			// Debug emits a log line per request -- noisy under crawl load.

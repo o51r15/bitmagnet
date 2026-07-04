@@ -65,7 +65,11 @@ func (c *prowlarrClient) get(path string, params url.Values) ([]byte, error) {
 	if params == nil {
 		params = url.Values{}
 	}
-	u := fmt.Sprintf("%s/api/v1/%s?%s", c.baseURL, path, params.Encode())
+	encoded := params.Encode()
+	u := c.baseURL + "/api/v1/" + path
+	if encoded != "" {
+		u += "?" + encoded
+	}
 	req, err := http.NewRequest(http.MethodGet, u, nil)
 	if err != nil {
 		return nil, err
