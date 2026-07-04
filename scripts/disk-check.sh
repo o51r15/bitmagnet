@@ -36,8 +36,16 @@ if [ "$DISK_USE" -ge "$THRESHOLD" ]; then
 
     # Stop just the bitmagnet container — Postgres keeps running so data
     # is not corrupted. The crawler can be restarted manually after cleanup.
-    if docker stop "$BITMAGNET_CONTAINER" 2>/dev/null; then
-        echo "$LOG_PREFIX $BITMAGNET_CONTAINER stopped successfully."
+    # -t 30: give the process 30s to flush in-flight DB operations before SIGKILL.
+    if docker stop -t 30 "$BITMAGNET_CONTAINER" 2>/dev/null; then
+        # docker stop returns 0 even when the container was already stopped,
+        # so verify the actual state rather than trusting the exit code.
+        STATUS=$(docker inspect --format='{{.State.Status}}' "$BITMAGNET_CONTAINER" 2>/dev/null)
+        if [ "$STATUS" = "exited" ]; then
+            echo "$LOG_PREFIX $BITMAGNET_CONTAINER stopped successfully."
+        else
+            echo "$LOG_PREFIX WARNING: stop returned 0 but container state is '$STATUS'"
+        fi
         echo "$LOG_PREFIX Free up space, then restart with: docker start $BITMAGNET_CONTAINER"
     else
         echo "$LOG_PREFIX ERROR: failed to stop $BITMAGNET_CONTAINER (not running?)"
