@@ -33,6 +33,7 @@ type crawler struct {
 	client        *prowlarrClient
 	db            lazy.Lazy[*gorm.DB]
 	imp           lazy.Lazy[importer.Importer]
+	seedHotQueue  chan protocol.ID
 	logger        *zap.SugaredLogger
 	triggerChan   chan int
 	stopped       chan struct{}
@@ -213,6 +214,12 @@ func (c *crawler) crawlIndexer(ctx context.Context, indexerID int, indexerName s
 			break
 		}
 		imported++
+		// Push to seed lookup hot queue (non-blocking — if full, the backfill
+		// scanner will pick it up later since the hash is already in the DB).
+		select {
+		case c.seedHotQueue <- id:
+		default:
+		}
 	}
 
 	ai.Drain()
