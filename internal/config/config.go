@@ -198,8 +198,12 @@ func resolveStructNode(
 
 	resolvedValue := reflect.New(value.Type())
 	decodeConfig := &mapstructure.DecoderConfig{
-		Metadata: nil,
-		Result:   resolvedValue.Interface(),
+		// StringToTimeDurationHookFunc lets mapstructure convert YAML string
+		// values like '1h' to time.Duration inside nested struct slices
+		// (e.g. prowlarr.IndexerConfig.Interval).
+		DecodeHook: mapstructure.StringToTimeDurationHookFunc(),
+		Metadata:   nil,
+		Result:     resolvedValue.Interface(),
 		MatchName: func(mapKey, fieldName string) bool {
 			return mapKey == fieldName
 		},

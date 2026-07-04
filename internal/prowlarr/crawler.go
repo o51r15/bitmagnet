@@ -77,7 +77,45 @@ func (c *crawler) start(ctx context.Context) {
 			continue
 		}
 		c.knownIndexers[idx.ID] = indexerMeta{name: idx.Name, categories: ic.Categories}
-		go c.runIndexerLoop(ctx, idx.ID, idx.Name, ic.Categories, defaultCrawlInterval)
+	}
+
+	// Startup hash compatibility check: probe each configured indexer with a
+	// small search to confirm it returns infoHash values. Indexers that never
+	// return hashes (private trackers, NZB-only sources) are skipped and a
+	// WARN is logged so users can update their config. (Confirmed broken in
+	// Session 10: Torrenting id:70, LimeTorrents id:15.)
+	for id, meta := range c.knownIndexers {
+		results, probeErr := c.client.search(id, meta.categories)
+		if probeErr != nil {
+			c.logger.Warnw("prowlarr: indexer probe failed, will still attempt crawls",
+				"indexer_id", id, "name", meta.name, "error", probeErr)
+			continue
+		}
+		hasHash := false
+		for _, r := range results {
+			if r.InfoHash != "" {
+				hasHash = true
+				break
+			}
+		}
+		if !hasHash && len(results) > 0 {
+			c.logger.Warnw("prowlarr: indexer returned no infoHash values, skipping"+
+				" (NZB-only or private tracker — configure a torrent-capable indexer)",
+				"indexer_id", id, "name", meta.name)
+			delete(c.knownIndexers, id)
+		}
+	}
+
+	// Start a ticker goroutine for each indexer that passed the hash check.
+	for id, meta := range c.knownIndexers {
+		interval := defaultCrawlInterval
+		for _, ic := range c.config.Indexers {
+			if ic.ID == id && ic.Interval > 0 {
+				interval = ic.Interval
+				break
+			}
+		}
+		go c.runIndexerLoop(ctx, id, meta.name, meta.categories, interval)
 	}
 
 	// On-demand trigger loop — look up name and categories from knownIndexers

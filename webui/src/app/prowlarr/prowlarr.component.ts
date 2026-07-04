@@ -5,6 +5,7 @@ import {
   OnInit,
   signal,
 } from "@angular/core";
+import { HttpClient } from "@angular/common/http";
 import { Apollo, gql } from "apollo-angular";
 import { AppModule } from "../app.module";
 import { DocumentTitleComponent } from "../layout/document-title.component";
@@ -52,11 +53,14 @@ const PROWLARR_SOURCES_QUERY = gql`
 })
 export class ProwlarrComponent implements OnInit {
   private apollo = inject(Apollo);
+  private http = inject(HttpClient);
 
   sources = signal<ProwlarrSource[]>([]);
   loading = signal(true);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   error = signal<any>(null);
+  // Set of source keys currently being crawled (used to disable the button).
+  crawling = signal<Set<string>>(new Set());
 
   ngOnInit() {
     this.apollo
@@ -101,5 +105,36 @@ export class ProwlarrComponent implements OnInit {
       facets: "torrent_source",
       torrent_source: sourceKey,
     };
+  }
+
+  isCrawling(sourceKey: string): boolean {
+    return this.crawling().has(sourceKey);
+  }
+
+  crawlNow(sourceKey: string): void {
+    // Extract numeric ID from key format "prowlarr-<id>"
+    const parts = sourceKey.split("-");
+    const id = parseInt(parts[1], 10);
+    if (isNaN(id)) return;
+
+    // Mark as in-flight
+    this.crawling.update((s) => new Set([...s, sourceKey]));
+
+    this.http
+      .post("/api/prowlarr/crawl", { indexerIds: [id] })
+      .subscribe({
+        complete: () =>
+          this.crawling.update((s) => {
+            const next = new Set(s);
+            next.delete(sourceKey);
+            return next;
+          }),
+        error: () =>
+          this.crawling.update((s) => {
+            const next = new Set(s);
+            next.delete(sourceKey);
+            return next;
+          }),
+      });
   }
 }

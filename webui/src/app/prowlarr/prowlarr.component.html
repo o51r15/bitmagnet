@@ -51,6 +51,14 @@
                 <mat-icon>search</mat-icon>
                 View Torrents
               </a>
+              <button
+                mat-button
+                [disabled]="isCrawling(source.key)"
+                (click)="crawlNow(source.key)"
+              >
+                <mat-icon>refresh</mat-icon>
+                {{ isCrawling(source.key) ? "Crawling…" : "Crawl Now" }}
+              </button>
             </mat-card-actions>
           </mat-card>
         }
