@@ -44,11 +44,11 @@ go build -ldflags "-s -w \
   -o /build/bitmagnet main.go
 
 # build runner
-FROM alpine:latest AS runner
+FROM alpine:3.20 AS runner
 
 LABEL org.opencontainers.image.source = "https://github.com/bitmagnet-io/bitmagnet"
 LABEL org.opencontainers.image.licenses = "MIT"
-LABEL org.opencontainers.image.base.name = "alpine:latest"
+LABEL org.opencontainers.image.base.name = "alpine:3.20"
 
 RUN apk --no-cache add ca-certificates curl tzdata jq iproute2-ss
 

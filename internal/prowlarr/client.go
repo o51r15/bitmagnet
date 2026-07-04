@@ -65,9 +65,15 @@ func (c *prowlarrClient) get(path string, params url.Values) ([]byte, error) {
 	if params == nil {
 		params = url.Values{}
 	}
-	params.Set("apikey", c.apiKey)
 	u := fmt.Sprintf("%s/api/v1/%s?%s", c.baseURL, path, params.Encode())
-	resp, err := c.httpClient.Get(u)
+	req, err := http.NewRequest(http.MethodGet, u, nil)
+	if err != nil {
+		return nil, err
+	}
+	// Send the API key as a header rather than a query param so it never
+	// appears in Prowlarr access logs, proxy logs, or network captures.
+	req.Header.Set("X-Api-Key", c.apiKey)
+	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -75,7 +81,9 @@ func (c *prowlarrClient) get(path string, params url.Values) ([]byte, error) {
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("prowlarr: API returned status %d for %s", resp.StatusCode, path)
 	}
-	return io.ReadAll(resp.Body)
+	// Cap response body to prevent memory exhaustion from large or adversarial payloads.
+	const maxBodyBytes = 32 * 1024 * 1024 // 32 MB — well above any real API response
+	return io.ReadAll(io.LimitReader(resp.Body, maxBodyBytes))
 }
 
 func (c *prowlarrClient) getIndexers() ([]Indexer, error) {
