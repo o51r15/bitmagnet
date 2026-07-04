@@ -14,8 +14,10 @@
 # ============================================================
 
 THRESHOLD=${1:-85}
-DATA_DIR="/home/o51r15/docker/bitmagnet/data/postgres"
-BITMAGNET_CONTAINER="bitmagnet"
+# Paths can be overridden via environment variables so the script works
+# without edits on different hosts or after a deployment path change.
+DATA_DIR="${BITMAGNET_DATA_DIR:-/home/o51r15/docker/bitmagnet/data/postgres}"
+BITMAGNET_CONTAINER="${BITMAGNET_CONTAINER_NAME:-bitmagnet}"
 LOG_PREFIX="[bitmagnet disk-check]"
 
 # Get current disk usage percentage for the data directory
