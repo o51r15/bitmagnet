@@ -30,10 +30,12 @@ func (w *worker) runBackfill(ctx context.Context) {
 		}
 
 		if len(hashes) == 0 {
-			// Backlog clear — sleep before polling again.
+			w.logger.Info("seed_lookup: backfill found 0 hashes, sleeping")
 			w.sleepOrDone(ctx, w.config.BackfillPollInterval)
 			continue
 		}
+
+		w.logger.Infow("seed_lookup: backfill batch", "count", len(hashes))
 
 		for _, h := range hashes {
 			select {

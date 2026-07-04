@@ -51,7 +51,7 @@ func (w *worker) reseedBootstrapNodes(ctx context.Context) {
 				// Ping the bootstrap node to add it to the routing table.
 				res, pingErr := w.client.Ping(ctx, addr.AddrPort())
 				if pingErr != nil {
-					w.logger.Debugw("seed_lookup: bootstrap ping failed",
+					w.logger.Infow("seed_lookup: bootstrap ping failed",
 						"addr", strAddr, "error", pingErr)
 					continue
 				}

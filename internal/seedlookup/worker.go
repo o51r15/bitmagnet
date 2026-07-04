@@ -59,6 +59,12 @@ func (w *worker) start() {
 	// Wait for routing table to populate before starting lookups.
 	w.sleepOrDone(ctx, 10*time.Second)
 
+	// Log routing table status so we can see if bootstrap succeeded.
+	nodes := w.kTable.GetNodesForSampleInfoHashes(1)
+	w.logger.Infow("seed_lookup: post-bootstrap routing table",
+		"has_nodes", len(nodes) > 0,
+		"hot_queue_len", len(w.hotQueue))
+
 	// Start the backfill scanner.
 	go w.runBackfill(ctx)
 
@@ -125,7 +131,7 @@ func (w *worker) processHashes(ctx context.Context) {
 		cancel()
 
 		if err != nil {
-			w.logger.Debugw("seed_lookup: lookup failed",
+			w.logger.Infow("seed_lookup: lookup failed",
 				"info_hash", infoHash.String(), "error", err)
 			continue
 		}
@@ -134,7 +140,7 @@ func (w *worker) processHashes(ctx context.Context) {
 			w.logger.Warnw("seed_lookup: persist failed",
 				"info_hash", infoHash.String(), "error", persistErr)
 		} else {
-			w.logger.Debugw("seed_lookup: persisted",
+			w.logger.Infow("seed_lookup: persisted",
 				"info_hash", infoHash.String(),
 				"seeders", result.seeders.Uint,
 				"leechers", result.leechers.Uint)
