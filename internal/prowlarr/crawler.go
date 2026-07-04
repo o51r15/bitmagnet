@@ -20,21 +20,44 @@ const defaultCrawlInterval = time.Hour
 // Exported so the GraphQL mutation resolver can call it.
 type CrawlNowFunc func(indexerID int)
 
+// indexerMeta caches the name and configured categories for an active indexer.
+// Used by the on-demand trigger handler so it reproduces the same crawl
+// parameters as the scheduled ticker loop.
+type indexerMeta struct {
+	name       string
+	categories []int
+}
+
 type crawler struct {
-	config      Config
-	client      *prowlarrClient
-	db          lazy.Lazy[*gorm.DB]
-	imp         lazy.Lazy[importer.Importer]
-	logger      *zap.SugaredLogger
-	triggerChan chan int
-	stopped     chan struct{}
+	config        Config
+	client        *prowlarrClient
+	db            lazy.Lazy[*gorm.DB]
+	imp           lazy.Lazy[importer.Importer]
+	logger        *zap.SugaredLogger
+	triggerChan   chan int
+	stopped       chan struct{}
+	knownIndexers map[int]indexerMeta // populated on start, used by trigger handler
 }
 
 func (c *crawler) start(ctx context.Context) {
-	indexers, err := c.client.getIndexers()
-	if err != nil {
-		c.logger.Warnw("prowlarr: failed to fetch indexers on startup", "error", err)
-		return
+	// Retry fetching indexers until Prowlarr is reachable. On a Pi where
+	// container startup isn't perfectly sequenced, Prowlarr may not be ready
+	// at the exact moment bitmagnet starts. Without this loop the per-indexer
+	// ticker goroutines are never spawned and the crawler stays permanently
+	// dead until the next container restart.
+	var indexers []Indexer
+	for {
+		var err error
+		indexers, err = c.client.getIndexers()
+		if err == nil {
+			break
+		}
+		c.logger.Warnw("prowlarr: failed to fetch indexers, retrying in 60s", "error", err)
+		select {
+		case <-c.stopped:
+			return
+		case <-time.After(60 * time.Second):
+		}
 	}
 
 	// Index configured entries by ID for fast lookup
@@ -43,7 +66,8 @@ func (c *crawler) start(ctx context.Context) {
 		configured[ic.ID] = ic
 	}
 
-	// Start a ticker goroutine for each enabled torrent indexer
+	// Build knownIndexers and start a ticker goroutine per enabled indexer.
+	c.knownIndexers = make(map[int]indexerMeta)
 	for _, idx := range indexers {
 		if idx.Protocol != "torrent" || !idx.Enable {
 			continue
@@ -52,17 +76,20 @@ func (c *crawler) start(ctx context.Context) {
 		if !ok || !ic.Enabled {
 			continue
 		}
+		c.knownIndexers[idx.ID] = indexerMeta{name: idx.Name, categories: ic.Categories}
 		go c.runIndexerLoop(ctx, idx.ID, idx.Name, ic.Categories, defaultCrawlInterval)
 	}
 
-	// On-demand trigger loop
+	// On-demand trigger loop — look up name and categories from knownIndexers
+	// so triggered crawls use the same parameters as the scheduled ticker.
 	go func() {
 		for {
 			select {
 			case <-c.stopped:
 				return
 			case indexerID := <-c.triggerChan:
-				go c.crawlIndexer(ctx, indexerID, "", nil)
+				meta := c.knownIndexers[indexerID]
+				go c.crawlIndexer(ctx, indexerID, meta.name, meta.categories)
 			}
 		}
 	}()
@@ -140,7 +167,7 @@ func (c *crawler) crawlIndexer(ctx context.Context, indexerID int, indexerName s
 			SourceName:  indexerName,
 			InfoHash:    id,
 			Name:        r.Title,
-			Size:        uint(r.Size),
+			Size:        uint(max(r.Size, 0)), // guard: r.Size is int64; negative values wrap silently without this
 			ContentType: contentTypeForCategories(r.Categories),
 			PublishedAt: r.PublishDate,
 		}); importErr != nil {
