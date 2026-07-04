@@ -56,17 +56,20 @@ func (w *worker) fetchBackfillBatch(ctx context.Context) ([]protocol.ID, error) 
 
 	var hashes []protocol.ID
 	result := db.WithContext(ctx).Raw(`
-		SELECT DISTINCT tts.info_hash
-		FROM torrents_torrent_sources tts
-		WHERE tts.source LIKE 'prowlarr-%'
-		  AND (tts.last_seed_lookup_at IS NULL)
-		  AND NOT EXISTS (
-		    SELECT 1 FROM torrents_torrent_sources dht
-		    WHERE dht.info_hash = tts.info_hash
-		      AND dht.source = 'dht'
-		      AND dht.seeders IS NOT NULL
-		  )
-		ORDER BY tts.created_at DESC
+		SELECT info_hash FROM (
+		  SELECT DISTINCT ON (tts.info_hash) tts.info_hash, tts.created_at
+		  FROM torrents_torrent_sources tts
+		  WHERE tts.source LIKE 'prowlarr-%'
+		    AND tts.last_seed_lookup_at IS NULL
+		    AND NOT EXISTS (
+		      SELECT 1 FROM torrents_torrent_sources dht
+		      WHERE dht.info_hash = tts.info_hash
+		        AND dht.source = 'dht'
+		        AND dht.seeders IS NOT NULL
+		    )
+		  ORDER BY tts.info_hash, tts.created_at DESC
+		) sub
+		ORDER BY sub.created_at DESC
 		LIMIT ?
 	`, w.config.BackfillBatchSize).Scan(&hashes)
 
