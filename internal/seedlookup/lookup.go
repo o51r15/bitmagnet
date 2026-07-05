@@ -33,6 +33,7 @@ func (w *worker) lookupSeeds(ctx context.Context, infoHash protocol.ID) (lookupR
 	// we don't need to be exhaustive — a few responsive nodes are enough.
 	var respondingAddrs []netip.AddrPort
 	queried := make(map[string]struct{})
+	peerAddrs := make(map[string]struct{}) // unique peer addresses seen
 
 	// Seed the work queue with closest nodes (up to 8).
 	candidates := make([]netip.AddrPort, 0, 8)
@@ -67,6 +68,9 @@ func (w *worker) lookupSeeds(ctx context.Context, infoHash protocol.ID) (lookupR
 			if len(res.Values) > 0 {
 				// This node has peers — it's a good candidate for scrape.
 				respondingAddrs = append(respondingAddrs, addr)
+				for _, peer := range res.Values {
+					peerAddrs[peer.String()] = struct{}{}
+				}
 			}
 			// Collect closer nodes for next round.
 			for _, n := range res.Nodes {
@@ -75,6 +79,14 @@ func (w *worker) lookupSeeds(ctx context.Context, infoHash protocol.ID) (lookupR
 		}
 		candidates = nextCandidates
 	}
+
+	// Count unique peers discovered during GetPeers as a floor estimate.
+	peerCount := len(peerAddrs)
+	w.logger.Infow("seed_lookup: GetPeers phase complete",
+		"info_hash", infoHash.String(),
+		"responding_nodes", len(respondingAddrs),
+		"unique_peers", peerCount,
+		"total_queried", len(queried))
 
 	// Phase 2: GetPeersScrape (BEP-33) — get bloom filter based seed/leech estimates.
 	// Try scraping from responding nodes first, fall back to closest nodes.
@@ -89,9 +101,11 @@ func (w *worker) lookupSeeds(ctx context.Context, infoHash protocol.ID) (lookupR
 		}
 	}
 
+	scrapeErrors := 0
 	for _, addr := range scrapeTargets {
 		res, err := w.client.GetPeersScrape(ctx, addr, infoHash)
 		if err != nil {
+			scrapeErrors++
 			continue
 		}
 		w.kTable.BatchCommand(ktable.PutNode{
@@ -103,6 +117,11 @@ func (w *worker) lookupSeeds(ctx context.Context, infoHash protocol.ID) (lookupR
 		seeders := model.NewNullUint(uint(res.BfSeeders.ApproximatedSize()))
 		leechers := model.NewNullUint(uint(res.BfPeers.ApproximatedSize()))
 
+		w.logger.Infow("seed_lookup: BEP-33 scrape succeeded",
+			"info_hash", infoHash.String(),
+			"seeders", seeders.Uint,
+			"leechers", leechers.Uint)
+
 		return lookupResult{
 			infoHash: infoHash,
 			seeders:  seeders,
@@ -110,10 +129,17 @@ func (w *worker) lookupSeeds(ctx context.Context, infoHash protocol.ID) (lookupR
 		}, nil
 	}
 
-	// No scrape succeeded — record zero rather than leaving unknown.
+	// No scrape succeeded — fall back to peer count from GetPeers.
+	// If GetPeers found nodes with peers, use that as a floor estimate.
+	w.logger.Infow("seed_lookup: BEP-33 scrape failed, using peer count fallback",
+		"info_hash", infoHash.String(),
+		"scrape_errors", scrapeErrors,
+		"scrape_targets", len(scrapeTargets),
+		"unique_peers_fallback", peerCount)
+
 	return lookupResult{
 		infoHash: infoHash,
-		seeders:  model.NewNullUint(0),
+		seeders:  model.NewNullUint(uint(peerCount)),
 		leechers: model.NewNullUint(0),
 	}, nil
 }
