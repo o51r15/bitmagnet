@@ -214,11 +214,11 @@ func (c *crawler) crawlIndexer(ctx context.Context, indexerID int, indexerName s
 			break
 		}
 		imported++
-		// Push to seed lookup hot queue (non-blocking — if full, the backfill
-		// scanner will pick it up later since the hash is already in the DB).
-		select {
-		case c.seedHotQueue <- id:
-		default:
+		// Persist seeders/leechers from the indexer's search results directly
+		// onto the Prowlarr source row. This is far more accurate than DHT-based
+		// lookups because the indexer already has tracker-reported counts.
+		if r.Seeders > 0 || r.Leechers > 0 {
+			c.updateSeedCounts(source, id, r.Seeders, r.Leechers)
 		}
 	}
 
@@ -231,6 +231,22 @@ func (c *crawler) crawlIndexer(ctx context.Context, indexerID int, indexerName s
 	}
 	c.logger.Infow("prowlarr: crawl complete",
 		"indexer_id", indexerID, "imported", imported, "new_results", len(results), "last_seen", maxDate)
+}
+
+// updateSeedCounts writes the indexer-reported seeders/leechers onto the
+// Prowlarr source row in torrents_torrent_sources.
+func (c *crawler) updateSeedCounts(source string, infoHash protocol.ID, seeders, leechers int) {
+	d, err := c.db.Get()
+	if err != nil {
+		return
+	}
+	if updateErr := d.Exec(
+		`UPDATE torrents_torrent_sources SET seeders = ?, leechers = ? WHERE info_hash = ? AND source = ?`,
+		seeders, leechers, infoHash, source,
+	).Error; updateErr != nil {
+		c.logger.Debugw("prowlarr: failed to update seed counts",
+			"info_hash", infoHash.String(), "error", updateErr)
+	}
 }
 
 // loadLastSeen returns the last seen publishDate for an indexer, or zero time if unknown.
