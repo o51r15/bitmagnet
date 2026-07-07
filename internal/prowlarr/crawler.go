@@ -190,6 +190,14 @@ func (c *crawler) crawlIndexer(ctx context.Context, indexerID int, indexerName s
 		ClassifierFlags: classifier.Flags{"tmdb_enabled": false},
 	})
 
+	// Collect seed data during import loop, apply after Drain() when rows exist.
+	type seedUpdate struct {
+		id       protocol.ID
+		seeders  int
+		leechers int
+	}
+	var seedUpdates []seedUpdate
+
 	imported := 0
 	for _, r := range results {
 		if r.InfoHash == "" {
@@ -214,15 +222,17 @@ func (c *crawler) crawlIndexer(ctx context.Context, indexerID int, indexerName s
 			break
 		}
 		imported++
-		// Persist seeders/leechers from the indexer's search results directly
-		// onto the Prowlarr source row. This is far more accurate than DHT-based
-		// lookups because the indexer already has tracker-reported counts.
 		if r.Seeders > 0 || r.Leechers > 0 {
-			c.updateSeedCounts(source, id, r.Seeders, r.Leechers)
+			seedUpdates = append(seedUpdates, seedUpdate{id: id, seeders: r.Seeders, leechers: r.Leechers})
 		}
 	}
 
 	ai.Drain()
+
+	// Now that Drain() has flushed source rows to the DB, apply seed counts.
+	for _, su := range seedUpdates {
+		c.updateSeedCounts(source, su.id, su.seeders, su.leechers)
+	}
 	if closeErr := ai.Close(); closeErr != nil {
 		c.logger.Warnw("prowlarr: import close error", "indexer_id", indexerID, "error", closeErr)
 	}
