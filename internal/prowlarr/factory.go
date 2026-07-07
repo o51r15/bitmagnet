@@ -5,7 +5,6 @@ import (
 
 	"github.com/bitmagnet-io/bitmagnet/internal/importer"
 	"github.com/bitmagnet-io/bitmagnet/internal/lazy"
-	"github.com/bitmagnet-io/bitmagnet/internal/protocol"
 	"github.com/bitmagnet-io/bitmagnet/internal/worker"
 	"go.uber.org/fx"
 	"go.uber.org/zap"
@@ -17,7 +16,6 @@ type Params struct {
 	Config        Config
 	DB            lazy.Lazy[*gorm.DB]
 	Importer      lazy.Lazy[importer.Importer]
-	SeedHotQueue  chan protocol.ID `name:"seed_lookup_hot_queue"`
 	Logger        *zap.SugaredLogger
 }
 
@@ -33,7 +31,6 @@ func New(p Params) Result {
 		client:       newClient(p.Config.URL, p.Config.APIKey),
 		db:           p.DB,
 		imp:          p.Importer,
-		seedHotQueue: p.SeedHotQueue,
 		logger:       p.Logger.Named("prowlarr"),
 		triggerChan:  make(chan int, 10),
 		stopped:      make(chan struct{}),

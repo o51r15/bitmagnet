@@ -98,7 +98,7 @@ func (s *server) read(ctx context.Context) {
 
 		err = bencode.Unmarshal(buffer[:n], &msg)
 		if err != nil {
-			s.logger.Infow("could not unmarshal packet data", "error", err, "from", from.String(), "bytes", n)
+			s.logger.Debugw("could not unmarshal packet data", "error", err)
 			continue
 		}
 
@@ -112,8 +112,6 @@ func (s *server) read(ctx context.Context) {
 			go s.handleQuery(ctx, recvMsg)
 		case dht.YResponse, dht.YError:
 			go s.handleResponse(recvMsg)
-		default:
-			s.logger.Infow("unknown message type", "type", msg.Y, "from", from.String())
 		}
 	}
 }
@@ -154,17 +152,10 @@ func (s *server) handleResponse(msg dht.RecvMsg) {
 
 	s.mutex.Lock()
 	ch, ok := s.queries[transactionID]
-	pendingCount := len(s.queries)
 	s.mutex.Unlock()
 
 	if ok {
 		ch <- msg
-	} else {
-		s.logger.Infow("unmatched response (no pending query)",
-			"transaction_id", transactionID,
-			"from", msg.From.String(),
-			"pending_queries", pendingCount,
-			"msg_type", msg.Msg.Y)
 	}
 }
 

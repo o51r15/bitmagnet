@@ -33,7 +33,6 @@ type crawler struct {
 	client        *prowlarrClient
 	db            lazy.Lazy[*gorm.DB]
 	imp           lazy.Lazy[importer.Importer]
-	seedHotQueue  chan protocol.ID
 	logger        *zap.SugaredLogger
 	triggerChan   chan int
 	stopped       chan struct{}
@@ -250,12 +249,16 @@ func (c *crawler) updateSeedCounts(source string, infoHash protocol.ID, seeders,
 	if err != nil {
 		return
 	}
-	if updateErr := d.Exec(
+	result := d.Exec(
 		`UPDATE torrents_torrent_sources SET seeders = ?, leechers = ? WHERE info_hash = ? AND source = ?`,
 		seeders, leechers, infoHash, source,
-	).Error; updateErr != nil {
+	)
+	if result.Error != nil {
 		c.logger.Debugw("prowlarr: failed to update seed counts",
-			"info_hash", infoHash.String(), "error", updateErr)
+			"info_hash", infoHash.String(), "error", result.Error)
+	} else if result.RowsAffected == 0 {
+		c.logger.Debugw("prowlarr: seed count update matched 0 rows (source row may not exist yet)",
+			"info_hash", infoHash.String(), "source", source)
 	}
 }
 
