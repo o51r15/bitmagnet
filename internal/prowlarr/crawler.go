@@ -227,13 +227,16 @@ func (c *crawler) crawlIndexer(ctx context.Context, indexerID int, indexerName s
 	}
 
 	ai.Drain()
-
-	// Now that Drain() has flushed source rows to the DB, apply seed counts.
-	for _, su := range seedUpdates {
-		c.updateSeedCounts(source, su.id, su.seeders, su.leechers)
-	}
 	if closeErr := ai.Close(); closeErr != nil {
 		c.logger.Warnw("prowlarr: import close error", "indexer_id", indexerID, "error", closeErr)
+	}
+
+	// Apply seed counts AFTER Close() — Drain() only waits for items to be
+	// buffered, but the final partial batch (< 100 items) isn't flushed to DB
+	// until Close() calls flushLocked(). Running updates before Close() means
+	// the source rows don't exist yet and the UPDATE matches 0 rows.
+	for _, su := range seedUpdates {
+		c.updateSeedCounts(source, su.id, su.seeders, su.leechers)
 	}
 	if !maxDate.IsZero() {
 		c.saveLastSeen(indexerID, maxDate)
