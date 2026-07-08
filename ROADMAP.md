@@ -549,20 +549,19 @@ disables that dimension of the check.
 
 ```yaml
 db_trim:
-  enabled: false                  # master switch, default off
-  schedule: "0 3 * * *"          # run daily at 3am
-  dry_run: false                 # preview mode — log what would be removed
-  protect_prowlarr_sources: true # never trim if a Prowlarr source exists
+  enabled: false                       # master switch, default off
+  dry_run: false                       # preview mode — log what would be removed
+  protect_prowlarr_sources: true       # never trim if a Prowlarr source exists
   sources:
-    dht:
-      max_age_days: 180          # trim DHT torrents older than 6 months...
-      min_seeds: 1               # ...that have fewer than 1 seeder
-      ignore_no_seed_data: true  # don't trim if seed count is unknown
-    prowlarr-20:
-      max_age_days: -1           # never trim Prowlarr content by age
-      min_seeds: -1              # never trim Prowlarr content by seeds
-    default:
-      max_age_days: -1           # default: never trim
+    - source: dht
+      max_age_days: 180                # trim DHT torrents older than 6 months...
+      min_seeds: 1                     # ...that have fewer than 1 seeder
+      ignore_no_seed_data: true        # don't trim if seed count is unknown
+    - source: prowlarr-20
+      max_age_days: -1                 # never trim Prowlarr content by age
+      min_seeds: -1                    # never trim Prowlarr content by seeds
+    - source: default
+      max_age_days: -1                 # default: never trim
       min_seeds: -1
       ignore_no_seed_data: true
 ```

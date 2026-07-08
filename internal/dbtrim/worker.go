@@ -93,14 +93,21 @@ func (w *trimWorker) runTrim(ctx context.Context) {
 // configForSource returns the SourceTrimConfig for the given source key,
 // falling back to "default" if no explicit entry exists.
 func (w *trimWorker) configForSource(source string) SourceTrimConfig {
-	if cfg, ok := w.config.Sources[source]; ok {
-		return cfg
+	var defaultCfg *SourceTrimConfig
+	for _, cfg := range w.config.Sources {
+		if cfg.Source == source {
+			return cfg
+		}
+		if cfg.Source == "default" {
+			c := cfg
+			defaultCfg = &c
+		}
 	}
-	if cfg, ok := w.config.Sources["default"]; ok {
-		return cfg
+	if defaultCfg != nil {
+		return *defaultCfg
 	}
 	// Ultimate fallback: everything disabled.
-	return SourceTrimConfig{MaxAgeDays: -1, MinSeeds: -1, IgnoreNoSeedData: true}
+	return SourceTrimConfig{Source: source, MaxAgeDays: -1, MinSeeds: -1, IgnoreNoSeedData: true}
 }
 
 // getProwlarrProtectedHashes returns a set of info_hashes that exist in any
