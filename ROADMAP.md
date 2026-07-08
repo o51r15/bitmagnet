@@ -526,62 +526,99 @@ including torrents that died years ago with zero seeders. Over time this produce
 grows without bound. Two categories of data are the main culprits:
 
 1. **Old torrents** — content indexed months or years ago that no one is seeding
-2. **Dead torrents** — torrents with zero seeders that have never recovered
+2. **Dead torrents** — torrents with few or zero seeders that have never recovered
 
 The existing disk guardian script (M0.6) is a blunt instrument — it pauses the crawler
 when disk is nearly full. This feature addresses DB growth proactively before it becomes
 a crisis.
 
-### Feature 1 — Age-based trim (per source)
+V3 has four components: configurable trim rules, seed data revalidation (to make trim
+accurate), a manual seed refresh button in the UI, and Prowlarr source protection.
 
-Remove torrents from a given source that were first seen more than N days ago. Configurable
-independently per source so users can apply different retention policies to DHT vs Prowlarr
-vs RSS content.
+### Feature 1 — Configurable seed-based trim (per source)
+
+Trim rules are defined per source. Each source can independently configure:
+- `max_age_days` — torrents older than this are candidates for trim (-1 = disabled)
+- `min_seeds` — torrents with fewer seeds than this are candidates for trim (-1 = disabled)
+- `ignore_no_seed_data` — if true, torrents without any seed data are exempt from
+  seed-based trim (prevents purging entries that simply lack seed counts)
+
+Both conditions must be met for a torrent to be trimmed: it must be older than
+`max_age_days` AND have fewer than `min_seeds` seeders. Setting either to -1
+disables that dimension of the check.
 
 ```yaml
 db_trim:
+  enabled: false                  # master switch, default off
+  schedule: "0 3 * * *"          # run daily at 3am
+  dry_run: false                 # preview mode — log what would be removed
+  protect_prowlarr_sources: true # never trim if a Prowlarr source exists
   sources:
     dht:
-      max_age_days: 180      # remove DHT torrents older than 6 months
+      max_age_days: 180          # trim DHT torrents older than 6 months...
+      min_seeds: 1               # ...that have fewer than 1 seeder
+      ignore_no_seed_data: true  # don't trim if seed count is unknown
     prowlarr-20:
-      max_age_days: 0        # 0 = never trim (keep all Prowlarr content)
+      max_age_days: -1           # never trim Prowlarr content by age
+      min_seeds: -1              # never trim Prowlarr content by seeds
     default:
-      max_age_days: 0        # default: never trim unless explicitly set
+      max_age_days: -1           # default: never trim
+      min_seeds: -1
+      ignore_no_seed_data: true
 ```
 
-Runs as a scheduled background worker (e.g. daily at low-traffic hours).
-Only removes torrents where ALL sources are past their max_age — a torrent
-indexed by both DHT and Prowlarr is only trimmed when both sources' rules apply.
+Runs as a scheduled background worker. Only removes a torrent when ALL of its
+sources' trim rules agree it should go — a torrent indexed by both DHT and
+Prowlarr is only trimmed when both sources' rules apply.
 
-### Feature 2 — Dead torrent purge (DHT-specific)
+### Feature 2 — Seed data revalidation service
 
-Remove torrents sourced from DHT that have had zero seeders for longer than N days.
-Seeders/leechers are tracked in `torrents_torrent_sources` and updated each time
-a torrent is re-encountered by the DHT crawler.
+Trim is only as accurate as the seed data it acts on. The DHT crawler already
+updates seed/leech counts via BEP 33 bloom filters when it re-encounters known
+hashes (`infohash_triage.go`, `RescrapeThreshold` default 30 days). This covers
+DHT-sourced torrents passively.
+
+For non-DHT sources (Prowlarr, RSS, future imports), seed data goes stale because
+the DHT crawler may never re-encounter those hashes. The revalidation service
+addresses this by re-querying the **discovery indexer** (the source that originally
+found the torrent) for updated seed/leech counts.
+
+Configuration:
+- `enabled` — master toggle (default: false)
+- `min_seeds` — only revalidate torrents with fewer than X seeds
+- `max_age_days` — only revalidate torrents newer than X days (ignore long-term
+  dead torrents — let trim handle those)
+- `interval_days` — how often to re-check each qualifying torrent
+- Rate-limited with oldest-checked-first priority to avoid hammering indexers
 
 ```yaml
-db_trim:
-  sources:
-    dht:
-      purge_unseeded_after_days: 30   # remove if 0 seeders for 30+ days
+seed_revalidation:
+  enabled: false
+  min_seeds: 5                   # revalidate torrents with < 5 seeds
+  max_age_days: 30               # only recheck torrents newer than 30 days
+  interval_days: 7               # recheck each torrent at most every 7 days
+  rate_limit_per_minute: 10      # max indexer queries per minute
 ```
 
-This is the highest-leverage DB size reduction for most users — the DHT surfaces
-enormous numbers of dead torrents that will never be active again. A 30-day
-unseeded window is conservative enough to avoid removing temporarily offline
-content while eliminating genuine ghost torrents.
+This creates a clean lifecycle: new torrents get actively monitored, torrents that
+age out of the `max_age_days` window stop getting rechecked, and trim cleans up
+the ones confirmed dead.
 
-### Feature 3 — Prowlarr resilience preservation
+### Feature 3 — Manual seed/leech refresh (UI)
+
+A button on the torrent detail page to manually trigger a seed/leech data refresh
+for a specific torrent. Queries the discovery indexer on demand. Useful for
+spot-checking individual torrents without waiting for the background revalidation
+cycle, or for rescuing a specific torrent from the trim pipeline.
+
+### Feature 4 — Prowlarr resilience preservation
 
 When trimming, torrents that exist in a Prowlarr source should be exempt from
-DHT age/dead-purge rules. This preserves the key selling point of the Prowlarr
+DHT age/seed-based trim rules. This preserves the key selling point of the Prowlarr
 integration: content remains searchable in bitmagnet even when the original
 indexer goes offline.
 
-```yaml
-db_trim:
-  protect_prowlarr_sources: true   # default: true
-```
+Controlled by `protect_prowlarr_sources: true` (default) in the trim config.
 
 ### Implementation notes
 
@@ -590,22 +627,87 @@ db_trim:
   torrents_torrent_sources all have ON DELETE CASCADE)
 - Worker logs rows removed per source per run for observability
 - Dry-run mode for users to preview what would be removed before committing
-- Migration needed: add `last_seen_at` index on torrents_torrent_sources if not
-  already present (needed for efficient dead-torrent queries)
+- Migration needed: add index on `torrents_torrent_sources (seeders, updated_at)`
+  for efficient trim queries
+- Revalidation service runs as a separate worker, queries discovery indexer only
+- Manual refresh button calls a new REST endpoint (same pattern as Prowlarr
+  crawl-now: REST via existing fx wiring, no GraphQL)
 
-### Config summary
+---
 
-```yaml
-db_trim:
-  enabled: true
-  schedule: "0 3 * * *"          # run daily at 3am
-  protect_prowlarr_sources: true  # never trim if a Prowlarr source exists
-  dry_run: false
-  sources:
-    dht:
-      max_age_days: 180
-      purge_unseeded_after_days: 30
-    default:
-      max_age_days: 0             # keep forever unless specified
-```
+## V4 — Bulk Import (Planned)
+
+> Enables backfilling the database from external torrent database dumps (TPB, RARBG, etc.).
+> Transforms bitmagnet from a pure crawler into a digital hoarding platform — import once,
+> then let DHT crawling keep the data current going forward.
+
+### Feature 1 — Source management
+
+Each import is tagged to a source (new or existing). Users define the source on import
+or match to an existing source. Sources track origin (TPB, RARBG, DHT, Prowlarr, etc.)
+and are the organizing principle for trim rules (V3) and data lifecycle.
+
+### Feature 2 — Format detection and parsing
+
+User declares the input format (CSV, SQL dump, etc.). System validates the first ~1000
+rows against the expected schema. If a mismatch is detected (e.g., user said CSV but
+it's a SQL dump, or columns don't match), the import pauses and advises the user of the
+detected format. Auto-detection of well-known dumps (TPB, RARBG) based on column
+signatures, suggesting the correct parser automatically.
+
+### Feature 3 — Deduplication
+
+Info hash is the dedup key. If a hash already exists in the DB, the import applies the
+user-selected conflict resolution strategy rather than inserting a duplicate.
+
+### Feature 4 — Duplicate conflict resolution
+
+Three merge strategies, selectable at import time:
+
+1. **Overwrite** — replace existing metadata with imported data
+2. **Add missing** (recommended default) — only fill in fields that are currently
+   null/empty in the existing record, leave populated fields untouched
+3. **Ignore** — skip the duplicate entirely, keep existing data as-is
+
+### Feature 5 — TMDB classification
+
+Two options only: **background** (throttled ~1 req/sec, chips away over days/weeks) or
+**disabled**. No immediate bulk classification option — importing millions of entries
+with TMDB enabled would get the user rate-limited or banned without understanding why.
+
+### Feature 6 — Import summary
+
+Two-phase display:
+
+**Pre-import preview** (first ~1000 rows): detected format, column mapping, estimated
+total records, sample entries for user sanity check before committing.
+
+**Post-import summary**:
+- Total records processed / imported / skipped (dupes) / failed (malformed)
+- Records with complete metadata vs. hash-only
+- Records with seed/leech data vs. without
+- Category breakdown (Movies, TV, Music, Books, Software, XXX, Unknown)
+- Date range of imported data (oldest to newest creation date)
+- Source assignment confirmation
+
+### Feature 7 — Interrupted import recovery
+
+Large imports (multi-GB SQL dumps) can fail mid-way. The import system tracks the last
+successfully imported row and supports resuming from that point. Full rollback of
+millions of inserts is impractical at scale — resume is the correct approach.
+
+### Feature 8 — Per-source trim rules for imports
+
+Imported sources inherit the V3 trim system. Each imported source gets its own
+configurable trim rules: age threshold, seed threshold, and the "ignore torrents
+without seed data" flag. Default is -1 (disabled) for all thresholds — opt-in
+trimming, not opt-out. Digital hoarders keep everything by default.
+
+### Integration with V3
+
+- Imported torrents with seed data are subject to trim rules like any other source
+- Imported torrents without seed data are protected by `ignore_no_seed_data: true`
+  until the DHT crawler or revalidation service updates their seed counts
+- The V3 revalidation service can re-query discovery indexers for imported torrents
+  that fall below the seed threshold, keeping imported data fresh over time
 
