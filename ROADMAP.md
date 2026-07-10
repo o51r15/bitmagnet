@@ -838,3 +838,36 @@ When `DHT_SIDECAR_ENABLED=true`, the dashboard status logic changes:
 - Should the sidecar health check also report DHT-specific metrics (node count, queries/sec) back to the main dashboard?
 - Network path: the sidecar is behind gluetun's network namespace — confirm the main instance can reach it via the shared `bitmagnet-net` external network
 
+---
+
+## NEXT PRIORITY — TMDB/OMDb Classification for Prowlarr-Sourced Torrents
+
+> **Status: PLANNED — TOP PRIORITY**
+> TMDB and OMDb enrichment only runs on DHT-sourced torrents. Prowlarr-sourced
+> torrents are not being classified/enriched. This significantly limits the value
+> of the Prowlarr crawler — torrents come in with indexer metadata only, no
+> poster art, no structured genre/cast/crew data, no content matching.
+
+### Problem
+
+When the Prowlarr crawler was built (V2.1), it was designed to skip TMDB classification
+via `ClassifierFlags` in the importer. The rationale was that Prowlarr metadata was
+"good enough" and classification would be expensive for bulk imports. In practice this
+means Prowlarr torrents show up in search results with minimal metadata — no poster,
+no TMDB/OMDb enrichment, no content type matching. They're second-class entries compared
+to DHT torrents that go through the full classifier pipeline.
+
+### What needs to happen
+
+1. Investigate the current `ClassifierFlags` skip logic in `internal/importer/importer.go`
+   to understand exactly what's being bypassed for Prowlarr sources
+2. Determine whether Prowlarr torrents should run through the full classifier (including
+   TMDB + OMDb) or a subset of it
+3. Consider rate limiting implications — Prowlarr can import hundreds of torrents per
+   crawl, and TMDB's free tier is rate-limited to ~1 req/sec
+4. Option A: queue Prowlarr torrents for classification like DHT torrents (same pipeline,
+   just remove the skip flag)
+5. Option B: classify on import but with a throttle/batch mode
+6. Ensure OMDb enrichment (which runs after TMDB in the classifier) also fires for
+   Prowlarr-sourced content
+
