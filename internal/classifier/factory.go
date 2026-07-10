@@ -5,6 +5,7 @@ import (
 
 	"github.com/bitmagnet-io/bitmagnet/internal/database/search"
 	"github.com/bitmagnet-io/bitmagnet/internal/lazy"
+	"github.com/bitmagnet-io/bitmagnet/internal/omdb"
 	"github.com/bitmagnet-io/bitmagnet/internal/tmdb"
 	"go.uber.org/fx"
 )
@@ -13,8 +14,10 @@ type Params struct {
 	fx.In
 	Config     Config
 	TmdbConfig tmdb.Config
+	OmdbConfig omdb.Config
 	Search     lazy.Lazy[search.Search]
 	TmdbClient lazy.Lazy[tmdb.Client]
+	OmdbClient lazy.Lazy[omdb.Client]
 }
 
 type Result struct {
@@ -36,6 +39,9 @@ func New(params Params) Result {
 			return nil, err
 		}
 
+		// OMDb is optional - if disabled or no API key, first use returns nil gracefully.
+		omdbClient, _ := params.OmdbClient.Get()
+
 		return compiler{
 			options: []compilerOption{
 				compilerFeatures(defaultFeatures),
@@ -47,11 +53,12 @@ func New(params Params) Result {
 					semaphore: make(chan struct{}, 1),
 				},
 				tmdbClient: tmdbClient,
+				omdbClient: omdbClient,
 			},
 		}, nil
 	})
 	lsrc := lazy.New[Source](func() (Source, error) {
-		src, err := newSourceProvider(params.Config, params.TmdbConfig).source()
+		src, err := newSourceProvider(params.Config, params.TmdbConfig, params.OmdbConfig).source()
 		if err != nil {
 			return Source{}, err
 		}

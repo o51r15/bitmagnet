@@ -4,11 +4,12 @@ import (
 	"os"
 
 	"github.com/adrg/xdg"
+	"github.com/bitmagnet-io/bitmagnet/internal/omdb"
 	"github.com/bitmagnet-io/bitmagnet/internal/tmdb"
 	"gopkg.in/yaml.v3"
 )
 
-func newSourceProvider(config Config, tmdbConfig tmdb.Config) sourceProvider {
+func newSourceProvider(config Config, tmdbConfig tmdb.Config, omdbConfig omdb.Config) sourceProvider {
 	return mergeSourceProvider{
 		providers: []sourceProvider{
 			yamlSourceProvider{rawSourceProvider: coreSourceProvider{}},
@@ -17,6 +18,7 @@ func newSourceProvider(config Config, tmdbConfig tmdb.Config) sourceProvider {
 			configSourceProvider{
 				config:      config,
 				tmdbEnabled: tmdbConfig.Enabled,
+				omdbEnabled: omdbConfig.Enabled && omdbConfig.APIKey != "",
 			},
 		},
 	}
@@ -119,6 +121,7 @@ func (cwdSourceProvider) source() ([]byte, error) {
 type configSourceProvider struct {
 	config      Config
 	tmdbEnabled bool
+	omdbEnabled bool
 }
 
 func (c configSourceProvider) source() (Source, error) {
@@ -133,6 +136,10 @@ func (c configSourceProvider) source() (Source, error) {
 
 	if !c.tmdbEnabled {
 		fs["tmdb_enabled"] = false
+	}
+
+	if !c.omdbEnabled {
+		fs["omdb_enabled"] = false
 	}
 
 	return Source{

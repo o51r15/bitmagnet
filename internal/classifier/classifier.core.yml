@@ -100,6 +100,13 @@ workflows:
                 condition: "flags.apis_enabled && flags.tmdb_enabled"
                 if_action: attach_tmdb_content_by_search
                 else_action: unmatched
+    # if content is attached and has an IMDB ID, enrich with OMDb metadata:
+    - if_else:
+        condition:
+          and:
+            - "result.hasAttachedContent"
+            - "flags.apis_enabled && flags.omdb_enabled"
+        if_action: attach_omdb_content
     # delete specific content types based on the configured flags:
     - if_else:
         condition:
@@ -269,11 +276,13 @@ flag_definitions:
   local_search_enabled: bool
   apis_enabled: bool
   tmdb_enabled: bool
+  omdb_enabled: bool
   delete_content_types: content_type_list
   delete_xxx: bool
 flags:
   local_search_enabled: true
   apis_enabled: true
   tmdb_enabled: true
+  omdb_enabled: true
   delete_content_types: []
   delete_xxx: false
