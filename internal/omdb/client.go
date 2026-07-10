@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-
-	"github.com/go-resty/resty/v2"
 )
 
 // Client is the public interface for OMDb lookups.
@@ -19,7 +17,7 @@ type client struct {
 
 // LookupByIMDBID fetches OMDb data for a given IMDB ID (e.g. "tt1234567").
 func (c client) LookupByIMDBID(ctx context.Context, imdbID string) (LookupResult, error) {
-	var response Result
+	var response LookupResult
 	_, err := c.requester.Request(ctx, map[string]string{
 		"i":    imdbID,
 		"plot": "short",
