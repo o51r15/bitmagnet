@@ -28,6 +28,13 @@ type indexerMeta struct {
 	categories []int
 }
 
+// seedUpdate holds seed/leech data for a single torrent hash.
+type seedUpdate struct {
+	id       protocol.ID
+	seeders  int
+	leechers int
+}
+
 type crawler struct {
 	config        Config
 	client        *prowlarrClient
@@ -168,6 +175,23 @@ func (c *crawler) crawlIndexer(ctx context.Context, indexerID int, indexerName s
 		}
 	}
 
+	// Collect seed refresh candidates from ALL results (before date filtering).
+	// If seed_refresh is enabled, update seed counts for existing torrents whose
+	// source row hasn't been updated in seed_refresh_max_age_days.
+	var staleRefreshUpdates []seedUpdate
+	if c.config.SeedRefreshEnabled && c.config.SeedRefreshMaxAgeDays > 0 {
+		for _, r := range results {
+			if r.InfoHash == "" || (r.Seeders <= 0 && r.Leechers <= 0) {
+				continue
+			}
+			id, parseErr := protocol.ParseID(strings.ToLower(r.InfoHash))
+			if parseErr != nil {
+				continue
+			}
+			staleRefreshUpdates = append(staleRefreshUpdates, seedUpdate{id: id, seeders: r.Seeders, leechers: r.Leechers})
+		}
+	}
+
 	// Filter to only results newer than last seen
 	var newResults []SearchResult
 	for _, r := range results {
@@ -190,11 +214,6 @@ func (c *crawler) crawlIndexer(ctx context.Context, indexerID int, indexerName s
 	})
 
 	// Collect seed data during import loop, apply after Drain() when rows exist.
-	type seedUpdate struct {
-		id       protocol.ID
-		seeders  int
-		leechers int
-	}
 	var seedUpdates []seedUpdate
 
 	imported := 0
@@ -238,6 +257,14 @@ func (c *crawler) crawlIndexer(ctx context.Context, indexerID int, indexerName s
 	for _, su := range seedUpdates {
 		c.updateSeedCounts(source, su.id, su.seeders, su.leechers)
 	}
+	// Refresh stale seed counts for existing torrents discovered in this crawl
+	if len(staleRefreshUpdates) > 0 {
+		refreshed := c.refreshStaleSeedCounts(source, staleRefreshUpdates)
+		if refreshed > 0 {
+			c.logger.Infow("prowlarr: refreshed stale seed counts",
+				"indexer_id", indexerID, "refreshed", refreshed)
+		}
+	}
 	if !maxDate.IsZero() {
 		c.saveLastSeen(indexerID, maxDate)
 	}
@@ -263,6 +290,29 @@ func (c *crawler) updateSeedCounts(source string, infoHash protocol.ID, seeders,
 		c.logger.Debugw("prowlarr: seed count update matched 0 rows (source row may not exist yet)",
 			"info_hash", infoHash.String(), "source", source)
 	}
+}
+
+// refreshStaleSeedCounts updates seed/leech counts for existing torrents whose
+// source row is older than seed_refresh_max_age_days. Returns the number of rows updated.
+func (c *crawler) refreshStaleSeedCounts(source string, updates []seedUpdate) int {
+	d, err := c.db.Get()
+	if err != nil {
+		return 0
+	}
+	cutoff := time.Now().AddDate(0, 0, -c.config.SeedRefreshMaxAgeDays)
+	refreshed := 0
+	for _, su := range updates {
+		result := d.Exec(
+			`UPDATE torrents_torrent_sources
+			 SET seeders = ?, leechers = ?, updated_at = NOW()
+			 WHERE info_hash = ? AND source = ? AND updated_at < ?`,
+			su.seeders, su.leechers, su.id, source, cutoff,
+		)
+		if result.Error == nil && result.RowsAffected > 0 {
+			refreshed++
+		}
+	}
+	return refreshed
 }
 
 // loadLastSeen returns the last seen publishDate for an indexer, or zero time if unknown.

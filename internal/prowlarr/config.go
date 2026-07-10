@@ -11,9 +11,11 @@ import (
 // Indexers lists per-indexer crawl settings; only explicitly listed and
 // enabled indexers are crawled.
 type Config struct {
-	URL      string          `yaml:"url"`
-	APIKey   string          `yaml:"api_key"`
-	Indexers []IndexerConfig `yaml:"indexers"`
+	URL                   string          `yaml:"url"`
+	APIKey                string          `yaml:"api_key"`
+	Indexers              []IndexerConfig `yaml:"indexers"`
+	SeedRefreshEnabled    bool            `yaml:"seed_refresh_enabled"`
+	SeedRefreshMaxAgeDays int             `yaml:"seed_refresh_max_age_days"`
 }
 
 // IndexerConfig defines crawl settings for one Prowlarr indexer.
@@ -27,7 +29,10 @@ type IndexerConfig struct {
 
 // NewDefaultConfig returns an empty config (integration disabled until configured).
 func NewDefaultConfig() Config {
-	return Config{}
+	return Config{
+		SeedRefreshEnabled:    true,
+		SeedRefreshMaxAgeDays: 30,
+	}
 }
 
 // newznabCategoryMap maps top-level Newznab category IDs to model.ContentType.
