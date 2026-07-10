@@ -787,3 +787,54 @@ the main container on the regular network. Bitmagnet's case is simpler because
 the worker split is already built into the architecture — no custom proxy or
 relay code needed.
 
+---
+
+## NEXT PRIORITY — DHT Sidecar Status Reporting
+
+> **Status: PLANNED — TOP PRIORITY**
+> The main bitmagnet dashboard shows "DHT: Inactive" because the primary instance
+> doesn't run the `dht_crawler` worker — it runs in the sidecar container. The dashboard
+> has no way to know the sidecar exists or whether it's healthy.
+
+### Problem
+
+With the split-worker sidecar deployment, the main bitmagnet instance runs
+`http_server,queue_server,prowlarr_crawler,db_trim` and the DHT sidecar runs
+`dht_crawler` in a separate container behind gluetun. The dashboard's DHT status
+check only looks at the local process's worker list — since `dht_crawler` isn't
+running locally, it reports Inactive. This is confusing and makes it look like
+the deployment is broken.
+
+### Solution
+
+Two new environment variables on the main instance:
+
+```yaml
+environment:
+  DHT_SIDECAR_ENABLED: "true"
+  DHT_SIDECAR_URL: "http://bitmagnet-dht:3334"   # or health endpoint
+```
+
+When `DHT_SIDECAR_ENABLED=true`, the dashboard status logic changes:
+1. Instead of checking for a local `dht_crawler` worker, it queries the sidecar's
+   health endpoint at `DHT_SIDECAR_URL`
+2. If the sidecar responds healthy → dashboard shows "DHT: Active (Sidecar)"
+3. If the sidecar is unreachable → dashboard shows "DHT: Sidecar Unreachable"
+4. If `DHT_SIDECAR_ENABLED=false` (default) → existing behavior unchanged
+
+### Implementation components
+
+| Component | Description |
+|---|---|
+| Config fields | Add `DHTSidecarEnabled bool` and `DHTSidecarURL string` to appropriate config struct |
+| Health probe | HTTP GET to sidecar URL on a 30s interval, cache result |
+| Dashboard API | Modify the status endpoint to return sidecar state when enabled |
+| Dashboard UI | Update Angular DHT status display to show sidecar states |
+| Sidecar health endpoint | The DHT sidecar already runs bitmagnet — expose a minimal health endpoint on the sidecar (may already exist via `http_server` if added to sidecar keys, or add a lightweight `/health` route) |
+
+### Open questions
+
+- Does the sidecar need to run `http_server` as an additional key to expose a health endpoint, or should we add a dedicated lightweight health listener?
+- Should the sidecar health check also report DHT-specific metrics (node count, queries/sec) back to the main dashboard?
+- Network path: the sidecar is behind gluetun's network namespace — confirm the main instance can reach it via the shared `bitmagnet-net` external network
+
