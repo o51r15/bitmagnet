@@ -21,11 +21,11 @@ ghcr.io/o51r15/bitmagnet:latest
 
 ### 1 — Recent cache (lightweight, storage-friendly)
 
-Poll DHT and configured indexers continuously and keep only recent content — for example, the last 90 days. Older torrents and unseeded content are purged automatically on a schedule.
+Poll DHT and configured indexers continuously and keep only recent content — for example, the last 90 days. Older torrents and unseeded content are purged automatically on a schedule via the built-in db_trim worker.
 
 **Good for:** Users who want a fast local search index of currently active torrents without committing to unlimited storage growth.
 
-> **Status:** DHT crawling and Prowlarr indexer crawling are fully functional today. Automatic age-based trim and unseeded purge are **planned for V3** and not yet implemented.
+> **Status:** Fully functional. DHT crawling, Prowlarr indexer crawling, and configurable per-source trim are all live.
 
 ### 2 — Full backfill (hoarder mode)
 
@@ -33,7 +33,7 @@ Crawl DHT and indexers continuously with no age limit. Build a permanent local d
 
 **Good for:** Users who want maximum coverage and are willing to manage storage growth manually.
 
-> **Status:** Fully functional today. Prowlarr integration is live. Automatic trim tools to manage growth are **planned for V3**.
+> **Status:** Fully functional. Prowlarr integration and db_trim (disabled by default) are live. Trim is opt-in — hoarders keep everything by default.
 
 ---
 
@@ -85,12 +85,35 @@ prowlarr:
 
 **Note:** Not all Prowlarr indexers return torrent hashes. Private trackers in particular often omit them. Check your first crawl log — if `imported: 0` alongside `new_results: 35+`, that indexer is not compatible. Public trackers like The Pirate Bay and 1337x work reliably.
 
-### DB size management — planned (V3)
-Configurable age-based trim and dead torrent purge, per source. Designed to support both use cases above:
+### DB size management — live (V3)
 
-- Keep Prowlarr-sourced content indefinitely while trimming DHT to a rolling window
-- Purge unseeded torrents after a configurable grace period (proposed default: 40 hours after first seen — long enough for new uploads to establish seeders)
-- Dry-run mode to preview what would be removed before enabling
+Configurable per-source trim via the `db_trim` worker. Runs as a background service on a 24-hour cycle. Disabled by default — must be explicitly enabled and configured in `config.yml`.
+
+- Per-source rules: trim DHT torrents older than X days with fewer than Y seeders while keeping Prowlarr content indefinitely
+- Prowlarr protection: torrents that exist in any Prowlarr source are exempt from trim regardless of other rules
+- Dry-run mode to preview what would be removed before committing
+- Torrents without seed data can be protected from seed-based trim (`ignore_no_seed_data`)
+
+```yaml
+# config.yml
+db_trim:
+  enabled: true
+  dry_run: false
+  protect_prowlarr_sources: true
+  sources:
+    - source: dht
+      max_age_days: 180
+      min_seeds: 1
+      ignore_no_seed_data: true
+    - source: default
+      max_age_days: -1          # -1 = disabled
+      min_seeds: -1
+      ignore_no_seed_data: true
+```
+
+Add `--keys=db_trim` to the worker command in your compose to enable the worker.
+
+**Still planned:** seed data revalidation service (re-query indexers for updated seed counts) and manual seed/leech refresh button in the torrent detail UI.
 
 ---
 
@@ -136,6 +159,21 @@ log:
 #       categories:
 #         - 2000        # Movies
 #         - 5000        # TV
+
+# Optional: DB trim — prune old/dead torrents on a schedule
+# db_trim:
+#   enabled: true
+#   dry_run: true                    # start with dry_run to preview
+#   protect_prowlarr_sources: true
+#   sources:
+#     - source: dht
+#       max_age_days: 180
+#       min_seeds: 1
+#       ignore_no_seed_data: true
+#     - source: default
+#       max_age_days: -1
+#       min_seeds: -1
+#       ignore_no_seed_data: true
 EOF
 ```
 
@@ -159,9 +197,9 @@ docker compose up -d
 
 ---
 
-### Step 3 — Enable Prowlarr crawler *(optional)*
+### Step 3 — Enable optional workers
 
-Add `--keys=prowlarr_crawler` to the bitmagnet `command:` block in your compose file, then add your Prowlarr config to `config.yml`.
+Add worker keys to the `command:` block in your compose file to enable additional features:
 
 ```yaml
 command:
@@ -170,48 +208,184 @@ command:
   - --keys=http_server
   - --keys=queue_server
   - --keys=dht_crawler
-  - --keys=prowlarr_crawler   # add this line
+  - --keys=prowlarr_crawler   # optional: Prowlarr indexer crawling
+  - --keys=db_trim            # optional: automatic trim of old/dead torrents
 ```
 
-The Prowlarr tab will appear in the web UI once the first crawl completes.
+**Prowlarr crawler:** Add your Prowlarr config to `config.yml` (see Prowlarr section above). The Prowlarr tab appears in the web UI once the first crawl completes.
+
+**DB trim:** Add your trim config to `config.yml` (see DB size management section above). Start with `dry_run: true` to preview what would be removed.
 
 ---
 
 ## Gluetun / VPN deployments
 
-If you run bitmagnet behind gluetun, keep postgres on its own bridge network — **do not** put postgres on `network_mode: service:gluetun`. When gluetun loses VPN connectivity, any container sharing its network namespace becomes unreachable. Postgres behind gluetun means a VPN hiccup takes your database offline and causes bitmagnet to crash-loop for the duration of the outage.
+If you want DHT traffic routed through a VPN, there are two approaches depending on your network setup.
 
-The correct topology:
+### Standard setup — single compose with gluetun
+
+The simplest approach puts bitmagnet and gluetun in the same compose file. Bitmagnet runs under gluetun's network namespace so all traffic (DHT, TMDB, etc.) goes through the VPN. Postgres stays on its own bridge network so a VPN hiccup doesn't take the database offline.
+
+Use gluetun's `FIREWALL_OUTBOUND_SUBNETS` to allow bitmagnet to reach local services (Prowlarr, *arr stack) on your LAN:
 
 ```yaml
 services:
   gluetun:
+    image: qmcgaw/gluetun
+    cap_add:
+      - NET_ADMIN
+    ports:
+      - "3333:3333"       # bitmagnet WebUI
+      - "3334:3334/udp"   # DHT
+      - "3334:3334/tcp"   # DHT
+    environment:
+      - FIREWALL_OUTBOUND_SUBNETS=192.168.1.0/24   # allow LAN access
+      # ... your VPN provider config ...
     networks:
-      - bitmagnet_internal   # gluetun joins the internal network
-
-  postgres:
-    networks:
-      - bitmagnet_internal   # postgres on the bridge, NOT behind gluetun
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U bitmagnet -d bitmagnet"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+      - bitmagnet_internal
 
   bitmagnet:
-    network_mode: "service:gluetun"   # bitmagnet still routes through VPN
+    image: ghcr.io/o51r15/bitmagnet:latest
+    network_mode: "service:gluetun"
     environment:
-      - POSTGRES_HOST=postgres         # resolves via shared bridge network
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PASSWORD=postgres
+      - TMDB_API_KEY=your_key
+    volumes:
+      - ./config:/root/.config/bitmagnet
+    command:
+      - worker
+      - run
+      - --keys=http_server
+      - --keys=queue_server
+      - --keys=dht_crawler
+      - --keys=prowlarr_crawler
     depends_on:
       postgres:
         condition: service_healthy
+
+  postgres:
+    image: postgres:16-alpine
+    networks:
+      - bitmagnet_internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
 networks:
   bitmagnet_internal:
     driver: bridge
 ```
 
-With this topology, VPN outages cause DHT and TMDB timeouts (logged as warnings) but bitmagnet keeps running. Postgres is unaffected.
+This works for most users. VPN outages cause DHT and TMDB timeouts (logged as warnings) but bitmagnet keeps running because Postgres is on a separate bridge.
+
+### Alternate setup — split worker sidecar (separate gluetun compose)
+
+If gluetun's `FIREWALL_OUTBOUND_SUBNETS` doesn't reliably allow access to your local network — which can happen depending on your Docker host, network topology, or VPN provider — there is an alternate approach that avoids the problem entirely.
+
+Instead of running all of bitmagnet under gluetun's network, you split the workers across two containers. The main container runs on the normal Docker network with full access to Postgres, Prowlarr, and your *arr stack. A second container runs only the DHT crawler under gluetun's network namespace. Both containers share the same Postgres database — bitmagnet's worker architecture already supports this with no code changes.
+
+An external Docker network bridges the two composes so the DHT container can reach Postgres.
+
+**Step 1 — Create the shared network:**
+
+```bash
+docker network create bitmagnet-net
+```
+
+**Step 2 — Gluetun compose** (your existing gluetun stack, add DHT ports and the shared network):
+
+```yaml
+services:
+  gluetun:
+    image: qmcgaw/gluetun
+    cap_add:
+      - NET_ADMIN
+    ports:
+      - "3334:3334/udp"   # DHT port for bitmagnet-dht
+      - "3334:3334/tcp"
+      # ... your existing ports ...
+    environment:
+      # ... your existing VPN config ...
+    networks:
+      - default
+      - bitmagnet-net
+
+  # ... your other services (qbittorrent, socks5, etc.) unchanged ...
+
+networks:
+  bitmagnet-net:
+    external: true
+```
+
+**Step 3 — Bitmagnet compose:**
+
+```yaml
+services:
+  bitmagnet:
+    image: ghcr.io/o51r15/bitmagnet:latest
+    container_name: bitmagnet
+    restart: unless-stopped
+    ports:
+      - "3333:3333"
+    environment:
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PASSWORD=postgres
+      - TMDB_API_KEY=your_key
+    volumes:
+      - ./config:/root/.config/bitmagnet
+    command:
+      - worker
+      - run
+      - --keys=http_server
+      - --keys=queue_server
+      - --keys=prowlarr_crawler
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - default
+      - bitmagnet-net
+
+  bitmagnet-dht:
+    image: ghcr.io/o51r15/bitmagnet:latest
+    container_name: bitmagnet-dht
+    restart: unless-stopped
+    network_mode: "container:gluetun"
+    environment:
+      - POSTGRES_HOST=bitmagnet-postgres    # container name, not service name
+      - POSTGRES_PASSWORD=postgres
+    volumes:
+      - ./config:/root/.config/bitmagnet
+    command:
+      - worker
+      - run
+      - --keys=dht_crawler
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: bitmagnet-postgres
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready"]
+      interval: 10s
+      start_period: 20s
+    networks:
+      - default
+      - bitmagnet-net
+
+networks:
+  bitmagnet-net:
+    external: true
+```
+
+**Deploy order:** gluetun stack first, then bitmagnet stack.
+
+**How it works:** The DHT crawler discovers info_hashes and writes them to the Postgres queue. The queue_server in the main container picks them up and handles classification, Prowlarr lookups, etc. The handoff happens entirely through the database — no direct communication between the two bitmagnet containers is needed.
+
+**Note:** `bitmagnet-dht` uses `POSTGRES_HOST=bitmagnet-postgres` (the container name) because it resolves via the shared external network, not the compose's internal service names. The main bitmagnet container uses `POSTGRES_HOST=postgres` (the service name) since it's in the same compose.
 
 ---
 
@@ -242,6 +416,8 @@ For a **Raspberry Pi (4GB)**, reduce to:
 | CI — multi-arch GHCR build on push to main | — | `9dc16bf` |
 | Prowlarr indexer crawler integration | — | `d7d291d` |
 | Prowlarr web UI page | — | `bafbf7f` |
+| Configurable per-source DB trim worker | — | — |
+| DB trim migration — source/age/seeders index | — | — |
 
 ---
 

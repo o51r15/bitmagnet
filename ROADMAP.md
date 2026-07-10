@@ -710,3 +710,80 @@ trimming, not opt-out. Digital hoarders keep everything by default.
 - The V3 revalidation service can re-query discovery indexers for imported torrents
   that fall below the seed threshold, keeping imported data fresh over time
 
+---
+
+## Infrastructure — VPN/Gluetun DHT Sidecar (Deployed)
+
+> **Status: DEPLOYED** — DHT crawler runs through gluetun VPN via sidecar container pattern.
+
+### Problem
+
+Running bitmagnet under `network_mode: service:gluetun` isolates it from the local
+Docker network — it can't reach Prowlarr, Postgres, or the *arr stack. Gluetun's
+`FIREWALL_OUTBOUND_SUBNETS` setting is unreliable for allowing local network access
+across containers. This is a known issue across multiple services (same problem hit
+Pulsarr/trackarr).
+
+### Solution — Split workers across two containers
+
+Bitmagnet's worker architecture already supports running individual workers in
+separate processes. All workers communicate through the shared Postgres database
+(queue tables, torrent tables). No direct inter-process communication needed.
+
+**bitmagnet** (main) — normal Docker network:
+- `--keys=http_server,queue_server,prowlarr_crawler,db_trim`
+- Full access to Prowlarr, Postgres, *arr stack, WebUI on port 3333
+
+**bitmagnet-dht** (sidecar) — gluetun network namespace:
+- `--keys=dht_crawler`
+- `network_mode: container:gluetun`
+- DHT UDP traffic routed through VPN tunnel
+- Reaches Postgres via shared external Docker network (`bitmagnet-net`)
+
+### Network topology
+
+```
+┌─────────────────────────────────────────────────┐
+│  gluetun compose (separate stack)               │
+│  ┌───────────┐                                  │
+│  │  gluetun  │◄── VPN tunnel ──► Internet       │
+│  │  :3334/udp│    (WireGuard)                   │
+│  └─────┬─────┘                                  │
+│        │ network_mode: container:gluetun        │
+│  ┌─────┴──────────┐                             │
+│  │  bitmagnet-dht │ (dht_crawler only)          │
+│  └────────────────┘                             │
+│        │ bitmagnet-net (external network)        │
+└────────┼────────────────────────────────────────┘
+         │
+┌────────┼────────────────────────────────────────┐
+│  bitmagnet compose                              │
+│  ┌─────┴──────┐    ┌──────────┐                 │
+│  │  postgres  │◄───│ bitmagnet│ (main workers)  │
+│  │  :5432     │    │ :3333    │                  │
+│  └────────────┘    └──────────┘                 │
+│        │ bitmagnet-net (external network)        │
+└─────────────────────────────────────────────────┘
+```
+
+### Deployment requirements
+
+1. Create shared network: `docker network create bitmagnet-net`
+2. Gluetun compose: add `bitmagnet-net` to gluetun's networks, add DHT ports
+   (`3334:3334/udp`, `3334:3334/tcp`) to gluetun's port mappings
+3. Bitmagnet compose: remove DHT ports from main container, remove `dht_crawler`
+   from main container's keys, add `bitmagnet-dht` service with
+   `network_mode: container:gluetun`, add `bitmagnet-net` to postgres and
+   bitmagnet services
+4. Deploy order: gluetun first, then bitmagnet
+5. `bitmagnet-dht` uses `POSTGRES_HOST=bitmagnet-postgres` (container name,
+   resolved via the shared external network)
+
+### Pattern origin
+
+Adapted from the Pulsarr/trackarr project which uses a similar sidecar pattern
+(`VPN_CONTAINER=gluetun`) to route tracker pings through gluetun while keeping
+the main container on the regular network. Bitmagnet's case is simpler because
+the worker split is already built into the architecture — no custom proxy or
+relay code needed.
+
