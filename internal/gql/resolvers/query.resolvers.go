@@ -44,9 +44,15 @@ func (r *queryResolver) Version(ctx context.Context) (string, error) {
 func (r *queryResolver) Workers(ctx context.Context) (gen.WorkersQuery, error) {
 	var workers []gen.Worker
 	for _, w := range r.Resolver.Workers.Workers() {
+		started := w.Started()
+		// When sidecar mode is enabled, report dht_crawler as started
+		// since it runs in the sidecar container, not locally.
+		if w.Key() == "dht_crawler" && r.Resolver.DhtCrawlerConfig.SidecarEnabled {
+			started = true
+		}
 		workers = append(workers, gen.Worker{
 			Key:     w.Key(),
-			Started: w.Started(),
+			Started: started,
 		})
 	}
 
