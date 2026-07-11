@@ -27,6 +27,13 @@ type Config struct {
 	// reached, torrents are still written to the DB but skipped for classification until
 	// the queue drains. Prevents unbounded queue_jobs table growth under TMDB rate limits.
 	MaxQueueDepth uint
+	// SidecarEnabled indicates that the DHT crawler runs in a separate sidecar container
+	// (e.g. behind gluetun VPN). When true, the dashboard health check probes the sidecar
+	// URL instead of checking for a local dht_crawler worker.
+	SidecarEnabled bool
+	// SidecarURL is the base URL of the sidecar's HTTP server (e.g. "http://bitmagnet-dht:3333").
+	// The health check does a GET to this URL to determine if the sidecar is reachable.
+	SidecarURL string
 }
 
 func NewDefaultConfig() Config {
