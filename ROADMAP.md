@@ -235,7 +235,7 @@ prowlarr:
 - Scheduled crawl and on-demand crawl via UI button
 - Upsert into main torrents table with source tracking (indexer name in torrents_torrent_source)
 - Metadata merge: fill gaps only, never overwrite existing identified data
-- Skip TMDB classification for Prowlarr-sourced torrents
+- ~~Skip TMDB classification for Prowlarr-sourced torrents~~ (removed — Prowlarr torrents now get full TMDB+OMDb classification, commit `a0dddc9`)
 - Most recent page of results per run
 - New Prowlarr UI page: indexer dropdown, filtered torrent list, crawl now button
 
@@ -244,7 +244,7 @@ prowlarr:
 - Metadata priority config (who wins on conflict: DHT vs indexer vs TMDB)
 - Pagination depth options and backfill on first run
 - Sort by seeders / exclude dead torrents (0 seeders)
-- TMDB enrichment option for Prowlarr-sourced torrents
+- ~~TMDB enrichment option for Prowlarr-sourced torrents~~ — DONE (commit `a0dddc9`)
 - Per-indexer crawl stats in UI
 
 ### Implementation components
@@ -789,9 +789,9 @@ relay code needed.
 
 ---
 
-## NEXT PRIORITY — DHT Sidecar Status Reporting
+## DHT Sidecar Status Reporting — COMPLETE
 
-> **Status: PLANNED — TOP PRIORITY**
+> **Status: COMPLETE** (commits `875185a`, `33c2c20`)
 > The main bitmagnet dashboard shows "DHT: Inactive" because the primary instance
 > doesn't run the `dht_crawler` worker — it runs in the sidecar container. The dashboard
 > has no way to know the sidecar exists or whether it's healthy.
@@ -840,9 +840,9 @@ When `DHT_SIDECAR_ENABLED=true`, the dashboard status logic changes:
 
 ---
 
-## NEXT PRIORITY — TMDB/OMDb Classification for Prowlarr-Sourced Torrents
+## TMDB/OMDb Classification for Prowlarr-Sourced Torrents — COMPLETE
 
-> **Status: PLANNED — TOP PRIORITY**
+> **Status: COMPLETE** (commit `a0dddc9`)
 > TMDB and OMDb enrichment only runs on DHT-sourced torrents. Prowlarr-sourced
 > torrents are not being classified/enriched. This significantly limits the value
 > of the Prowlarr crawler — torrents come in with indexer metadata only, no
