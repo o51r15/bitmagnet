@@ -48,6 +48,10 @@ Crawl DHT and indexers continuously with no age limit. Build a permanent local d
 - **BEP-47 padding exclusion** â€” synthetic padding files no longer bloat the torrent_files table
 - **Disk guardian** â€” optional script pauses crawling at a configurable disk usage threshold
 
+### OMDb enrichment — live
+- **OMDb integration** — enriches movies and TV with Rotten Tomatoes scores, Metacritic ratings, awards, box office data, and detailed plot summaries via the [OMDb API](https://www.omdbapi.com). Runs automatically after TMDB classification for any torrent with an IMDB ID.
+- Works on both DHT-sourced and Prowlarr-sourced torrents
+
 ### Prowlarr integration â€” live
 Connect bitmagnet to a running [Prowlarr](https://prowlarr.com) instance to crawl configured indexers on a schedule. Imported torrents persist in the local database and remain searchable even when the source indexer goes offline.
 
@@ -145,6 +149,12 @@ processor:
 
 tmdb:
   enabled: true
+
+# Optional: OMDb enrichment (Rotten Tomatoes scores, Metacritic, awards)
+# Get a free key at https://www.omdbapi.com/apikey.aspx
+# omdb:
+#   enabled: true
+#   api_key: your_omdb_key_here
 
 log:
   level: warn
@@ -334,6 +344,8 @@ services:
       - POSTGRES_HOST=postgres
       - POSTGRES_PASSWORD=postgres
       - TMDB_API_KEY=your_key
+      - DHT_CRAWLER_SIDECAR_ENABLED=true
+      - DHT_CRAWLER_SIDECAR_URL=http://gluetun:3333
     volumes:
       - ./config:/root/.config/bitmagnet
     command:
@@ -363,6 +375,7 @@ services:
       - worker
       - run
       - --keys=dht_crawler
+      - --keys=http_server
 
   postgres:
     image: postgres:16-alpine
@@ -384,6 +397,8 @@ networks:
 **Deploy order:** gluetun stack first, then bitmagnet stack.
 
 **How it works:** The DHT crawler discovers info_hashes and writes them to the Postgres queue. The queue_server in the main container picks them up and handles classification, Prowlarr lookups, etc. The handoff happens entirely through the database â€” no direct communication between the two bitmagnet containers is needed.
+
+**Dashboard status:** The sidecar environment variables (`DHT_CRAWLER_SIDECAR_ENABLED`, `DHT_CRAWLER_SIDECAR_URL`) tell the main instance to probe the sidecar's HTTP server for health status. The dashboard shows DHT as active when the sidecar is reachable. The sidecar must run `--keys=http_server` alongside `--keys=dht_crawler` to expose its health endpoint.
 
 **Note:** `bitmagnet-dht` uses `POSTGRES_HOST=bitmagnet-postgres` (the container name) because it resolves via the shared external network, not the compose's internal service names. The main bitmagnet container uses `POSTGRES_HOST=postgres` (the service name) since it's in the same compose.
 
@@ -418,6 +433,10 @@ For a **Raspberry Pi (4GB)**, reduce to:
 | Prowlarr web UI page | â€” | `bafbf7f` |
 | Configurable per-source DB trim worker | â€” | â€” |
 | DB trim migration â€” source/age/seeders index | â€” | â€” |
+| OMDb enrichment via classifier pipeline | — | — |
+| DHT sidecar health status reporting | — | `875185a` |
+| TMDB/OMDb classification for Prowlarr torrents | — | `a0dddc9` |
+| DHT sidecar worker status in dashboard | — | `33c2c20` |
 
 ---
 
