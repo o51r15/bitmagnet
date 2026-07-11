@@ -6,7 +6,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/bitmagnet-io/bitmagnet/internal/classifier"
 	"github.com/bitmagnet-io/bitmagnet/internal/importer"
 	"github.com/bitmagnet-io/bitmagnet/internal/lazy"
 	"github.com/bitmagnet-io/bitmagnet/internal/protocol"
@@ -209,8 +208,7 @@ func (c *crawler) crawlIndexer(ctx context.Context, indexerID int, indexerName s
 
 	source := fmt.Sprintf("prowlarr-%d", indexerID)
 	ai := imp.New(ctx, importer.Info{
-		ID:              fmt.Sprintf("prowlarr-%d-%d", indexerID, time.Now().Unix()),
-		ClassifierFlags: classifier.Flags{"tmdb_enabled": false},
+		ID: fmt.Sprintf("prowlarr-%d-%d", indexerID, time.Now().Unix()),
 	})
 
 	// Collect seed data during import loop, apply after Drain() when rows exist.
