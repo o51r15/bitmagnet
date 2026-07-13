@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -64,8 +65,28 @@ func (h *handler) handleAnalyze(c *gin.Context) {
 	}
 	defer file.Close()
 
+	// Peek first bytes to detect format.
 	cr := &countingReader{r: file, limit: h.config.MaxUploadBytes}
-	result := AnalyzeStream(cr)
+	format, combined := DetectFormatFromReader(cr)
+
+	if format == FormatSQLite {
+		// SQLite requires random access; save to temp file.
+		tmpPath, err := SaveToTemp(combined, h.config.MaxUploadBytes)
+		if err != nil {
+			if strings.Contains(err.Error(), "exceeds maximum size") {
+				c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": err.Error()})
+			} else {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save file"})
+			}
+			return
+		}
+		defer os.Remove(tmpPath)
+		result := AnalyzeSQLite(tmpPath)
+		c.JSON(http.StatusOK, result)
+		return
+	}
+
+	result := AnalyzeStream(combined)
 	if cr.exceeded {
 		c.JSON(http.StatusRequestEntityTooLarge, gin.H{
 			"error": fmt.Sprintf("file exceeds maximum size of %d bytes", h.config.MaxUploadBytes),
@@ -145,7 +166,7 @@ func (h *handler) handleExecute(c *gin.Context) {
 	var importErr error
 
 	callback := func(item ParsedItem) {
-		if importErr != nil || cr.exceeded {
+		if importErr != nil {
 			return
 		}
 
@@ -185,13 +206,30 @@ func (h *handler) handleExecute(c *gin.Context) {
 	}
 
 	var parseErr error
-	switch format {
-	case FormatNDJSON:
-		parseErr = ParseNDJSONStream(combined, callback)
-	case FormatSQL:
-		parseErr = ParseSQLStream(combined, callback)
-	default:
-		parseErr = ParseCSVStream(combined, callback)
+	if format == FormatSQLite {
+		// SQLite needs random access; save to temp file.
+		tmpPath, saveErr := SaveToTemp(combined, h.config.MaxUploadBytes)
+		if saveErr != nil {
+			ai.Drain()
+			ai.Close()
+			if strings.Contains(saveErr.Error(), "exceeds maximum size") {
+				c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": saveErr.Error()})
+			} else {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save file"})
+			}
+			return
+		}
+		defer os.Remove(tmpPath)
+		parseErr = ParseSQLiteStream(tmpPath, callback)
+	} else {
+		switch format {
+		case FormatNDJSON:
+			parseErr = ParseNDJSONStream(combined, callback)
+		case FormatSQL:
+			parseErr = ParseSQLStream(combined, callback)
+		default:
+			parseErr = ParseCSVStream(combined, callback)
+		}
 	}
 	if parseErr != nil {
 		h.logger.Warnw("dbimport: parse error", "format", format, "error", parseErr)

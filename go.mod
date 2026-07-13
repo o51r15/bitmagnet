@@ -53,6 +53,7 @@ require (
 	gorm.io/gen v0.3.26
 	gorm.io/gorm v1.25.12
 	gorm.io/plugin/dbresolver v1.5.3
+	modernc.org/sqlite v1.34.1
 )
 
 require (

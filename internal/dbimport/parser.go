@@ -46,6 +46,9 @@ type AnalysisResult struct {
 // DetectFormat reads the first few bytes of data to guess the format.
 // Works on both full data and small prefixes.
 func DetectFormat(data []byte) Format {
+	if IsSQLite(data) {
+		return FormatSQLite
+	}
 	trimmed := strings.TrimSpace(string(data))
 	if len(trimmed) == 0 {
 		return FormatCSV // fallback
@@ -89,6 +92,8 @@ func validInfoHash(s string) bool {
 // labels ("Movies", "TV", "Music", etc.).
 func parseContentType(s string) model.NullContentType {
 	s = strings.TrimSpace(strings.ToLower(s))
+
+	// Exact matches first.
 	switch s {
 	case "movie", "movies":
 		return model.NullContentType{Valid: true, ContentType: model.ContentTypeMovie}
@@ -108,9 +113,26 @@ func parseContentType(s string) model.NullContentType {
 		return model.NullContentType{Valid: true, ContentType: model.ContentTypeSoftware}
 	case "xxx", "adult", "porn":
 		return model.NullContentType{Valid: true, ContentType: model.ContentTypeXxx}
-	default:
-		return model.NullContentType{}
 	}
+
+	// Prefix matches for RARBG-style categories (movies_x264, games_pc_iso, tv_sd, etc.).
+	if strings.HasPrefix(s, "movie") {
+		return model.NullContentType{Valid: true, ContentType: model.ContentTypeMovie}
+	}
+	if strings.HasPrefix(s, "tv") {
+		return model.NullContentType{Valid: true, ContentType: model.ContentTypeTvShow}
+	}
+	if strings.HasPrefix(s, "game") {
+		return model.NullContentType{Valid: true, ContentType: model.ContentTypeGame}
+	}
+	if strings.HasPrefix(s, "music") {
+		return model.NullContentType{Valid: true, ContentType: model.ContentTypeMusic}
+	}
+	if strings.HasPrefix(s, "software") {
+		return model.NullContentType{Valid: true, ContentType: model.ContentTypeSoftware}
+	}
+
+	return model.NullContentType{}
 }
 
 // ParseCSVStream reads a CSV file, calling fn for each valid item.
