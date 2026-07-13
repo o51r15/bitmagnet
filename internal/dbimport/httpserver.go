@@ -53,8 +53,9 @@ func (h *handler) Apply(e *gin.Engine) error {
 	return nil
 }
 
-// handleAnalyze accepts a multipart file upload, parses it, and returns
-// format detection, category counts, and total row count.
+// handleAnalyze accepts a multipart file upload and streams through it to
+// return format detection, category counts, and total row count. The file
+// is never loaded entirely into memory.
 func (h *handler) handleAnalyze(c *gin.Context) {
 	file, _, err := c.Request.FormFile("file")
 	if err != nil {
@@ -63,21 +64,15 @@ func (h *handler) handleAnalyze(c *gin.Context) {
 	}
 	defer file.Close()
 
-	// Read up to MaxUploadBytes + 1 to detect oversized files.
-	lr := io.LimitReader(file, h.config.MaxUploadBytes+1)
-	data, err := io.ReadAll(lr)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to read file"})
-		return
-	}
-	if int64(len(data)) > h.config.MaxUploadBytes {
+	cr := &countingReader{r: file, limit: h.config.MaxUploadBytes}
+	result := AnalyzeStream(cr)
+	if cr.exceeded {
 		c.JSON(http.StatusRequestEntityTooLarge, gin.H{
 			"error": fmt.Sprintf("file exceeds maximum size of %d bytes", h.config.MaxUploadBytes),
 		})
 		return
 	}
 
-	result := Analyze(data)
 	c.JSON(http.StatusOK, result)
 }
 
@@ -123,36 +118,11 @@ func (h *handler) handleExecute(c *gin.Context) {
 	}
 	defer file.Close()
 
-	lr := io.LimitReader(file, h.config.MaxUploadBytes+1)
-	data, err := io.ReadAll(lr)
+	// Get the importer before we start streaming.
+	imp, err := h.importer.Get()
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to read file"})
-		return
-	}
-	if int64(len(data)) > h.config.MaxUploadBytes {
-		c.JSON(http.StatusRequestEntityTooLarge, gin.H{
-			"error": fmt.Sprintf("file exceeds maximum size of %d bytes", h.config.MaxUploadBytes),
-		})
-		return
-	}
-
-	// Parse the file.
-	format := DetectFormat(data)
-	reader := strings.NewReader(string(data))
-	var items []ParsedItem
-	switch format {
-	case FormatNDJSON:
-		items, err = ParseNDJSON(reader)
-	case FormatSQL:
-		items, err = ParseSQL(reader)
-	default:
-		items, err = ParseCSV(reader)
-	}
-	if err != nil {
-		h.logger.Warnw("dbimport: parse error", "format", format, "error", err)
-	}
-	if len(items) == 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "no valid torrents found in file"})
+		h.logger.Errorw("dbimport: failed to get importer", "error", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "importer unavailable"})
 		return
 	}
 
@@ -163,40 +133,37 @@ func (h *handler) handleExecute(c *gin.Context) {
 	}
 	filterActive := len(catFilter) > 0
 
-	// Get the importer.
-	imp, err := h.importer.Get()
-	if err != nil {
-		h.logger.Errorw("dbimport: failed to get importer", "error", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "importer unavailable"})
-		return
-	}
-
 	sourceKey := "import-" + sourceName
 	ai := imp.New(c.Request.Context(), importer.Info{
 		ID: fmt.Sprintf("import-%s-%d", sourceName, time.Now().Unix()),
 	})
 
-	imported := 0
-	skipped := 0
-	for _, item := range items {
-		// Apply category filter.
+	cr := &countingReader{r: file, limit: h.config.MaxUploadBytes}
+	format, combined := DetectFormatFromReader(cr)
+
+	var imported, skipped int
+	var importErr error
+
+	callback := func(item ParsedItem) {
+		if importErr != nil || cr.exceeded {
+			return
+		}
+
 		if filterActive {
-			catKey := ""
+			catKey := "unknown"
 			if item.ContentType.Valid {
 				catKey = string(item.ContentType.ContentType)
-			} else {
-				catKey = "unknown"
 			}
 			if !catFilter[catKey] {
 				skipped++
-				continue
+				return
 			}
 		}
 
-		id, parseErr := protocol.ParseID(item.InfoHash)
-		if parseErr != nil {
+		id, parseIDErr := protocol.ParseID(item.InfoHash)
+		if parseIDErr != nil {
 			skipped++
-			continue
+			return
 		}
 
 		importItem := importer.Item{
@@ -209,11 +176,41 @@ func (h *handler) handleExecute(c *gin.Context) {
 			PublishedAt: item.PublishedAt,
 		}
 
-		if importErr := ai.Import(importItem); importErr != nil {
-			h.logger.Warnw("dbimport: import error", "hash", item.InfoHash, "error", importErr)
-			break
+		if err := ai.Import(importItem); err != nil {
+			h.logger.Warnw("dbimport: import error", "hash", item.InfoHash, "error", err)
+			importErr = err
+			return
 		}
 		imported++
+	}
+
+	var parseErr error
+	switch format {
+	case FormatNDJSON:
+		parseErr = ParseNDJSONStream(combined, callback)
+	case FormatSQL:
+		parseErr = ParseSQLStream(combined, callback)
+	default:
+		parseErr = ParseCSVStream(combined, callback)
+	}
+	if parseErr != nil {
+		h.logger.Warnw("dbimport: parse error", "format", format, "error", parseErr)
+	}
+
+	if cr.exceeded {
+		ai.Drain()
+		ai.Close()
+		c.JSON(http.StatusRequestEntityTooLarge, gin.H{
+			"error": fmt.Sprintf("file exceeds maximum size of %d bytes", h.config.MaxUploadBytes),
+		})
+		return
+	}
+
+	if imported == 0 {
+		ai.Drain()
+		ai.Close()
+		c.JSON(http.StatusBadRequest, gin.H{"error": "no valid torrents found in file"})
+		return
 	}
 
 	ai.Drain()
@@ -225,7 +222,6 @@ func (h *handler) handleExecute(c *gin.Context) {
 		"source", sourceKey,
 		"imported", imported,
 		"skipped", skipped,
-		"total_parsed", len(items),
 	)
 
 	c.JSON(http.StatusOK, gin.H{
@@ -234,6 +230,28 @@ func (h *handler) handleExecute(c *gin.Context) {
 		"imported": imported,
 		"skipped":  skipped,
 	})
+}
+
+// countingReader wraps a reader and tracks bytes read, setting exceeded=true
+// if the limit is passed. After exceeding, reads return io.EOF.
+type countingReader struct {
+	r        io.Reader
+	n        int64
+	limit    int64
+	exceeded bool
+}
+
+func (cr *countingReader) Read(p []byte) (int, error) {
+	if cr.exceeded {
+		return 0, io.EOF
+	}
+	n, err := cr.r.Read(p)
+	cr.n += int64(n)
+	if cr.n > cr.limit {
+		cr.exceeded = true
+		return n, io.EOF
+	}
+	return n, err
 }
 
 // isValidSourceName allows only safe characters for source keys.

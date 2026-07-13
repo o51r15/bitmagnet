@@ -44,6 +44,7 @@ type AnalysisResult struct {
 }
 
 // DetectFormat reads the first few bytes of data to guess the format.
+// Works on both full data and small prefixes.
 func DetectFormat(data []byte) Format {
 	trimmed := strings.TrimSpace(string(data))
 	if len(trimmed) == 0 {
@@ -62,6 +63,18 @@ func DetectFormat(data []byte) Format {
 		return FormatSQL
 	}
 	return FormatCSV
+}
+
+// DetectFormatFromReader peeks the first 4KB of a reader to detect format,
+// then returns the format and a new reader that replays the peeked bytes.
+func DetectFormatFromReader(r io.Reader) (Format, io.Reader) {
+	peek := make([]byte, 4096)
+	n, _ := io.ReadFull(r, peek)
+	peek = peek[:n]
+	format := DetectFormat(peek)
+	// Create a reader that replays the peeked bytes followed by the rest.
+	combined := io.MultiReader(strings.NewReader(string(peek)), r)
+	return format, combined
 }
 
 // validInfoHash checks if a string is a valid 40-char hex info hash.
@@ -100,27 +113,24 @@ func parseContentType(s string) model.NullContentType {
 	}
 }
 
-// ParseCSV reads a CSV file. It auto-detects column positions by header names.
-// Required: a column containing info hashes (40 hex chars).
-// Optional columns: name/title, size, category/content_type, seeders, leechers, date/published.
-func ParseCSV(r io.Reader) ([]ParsedItem, error) {
+// ParseCSVStream reads a CSV file, calling fn for each valid item.
+// Streams line-by-line without accumulating all items in memory.
+func ParseCSVStream(r io.Reader, fn func(ParsedItem)) error {
 	cr := csv.NewReader(r)
 	cr.LazyQuotes = true
 	cr.TrimLeadingSpace = true
-	cr.ReuseRecord = true
+	cr.ReuseRecord = false // need stable records for callback
 
 	header, err := cr.Read()
 	if err != nil {
-		return nil, fmt.Errorf("reading CSV header: %w", err)
+		return fmt.Errorf("reading CSV header: %w", err)
 	}
 
-	// Map column indices by normalized header name.
 	colIdx := make(map[string]int)
 	for i, h := range header {
 		colIdx[strings.ToLower(strings.TrimSpace(h))] = i
 	}
 
-	// Find the info_hash column.
 	hashCol := -1
 	for _, candidate := range []string{"info_hash", "infohash", "hash", "btih"} {
 		if idx, ok := colIdx[candidate]; ok {
@@ -129,12 +139,12 @@ func ParseCSV(r io.Reader) ([]ParsedItem, error) {
 		}
 	}
 
-	// If no explicit hash column, try to auto-detect by scanning first data row.
+	// Auto-detect hash column from first data row if no header match.
 	var peekedRow []string
 	if hashCol < 0 {
 		peek, peekErr := cr.Read()
 		if peekErr != nil {
-			return nil, fmt.Errorf("CSV has no recognizable info_hash column and no data rows")
+			return fmt.Errorf("CSV has no recognizable info_hash column and no data rows")
 		}
 		for i, val := range peek {
 			if validInfoHash(strings.TrimSpace(val)) {
@@ -143,15 +153,11 @@ func ParseCSV(r io.Reader) ([]ParsedItem, error) {
 			}
 		}
 		if hashCol < 0 {
-			return nil, fmt.Errorf("CSV has no recognizable info_hash column (tried: info_hash, infohash, hash, btih)")
+			return fmt.Errorf("CSV has no recognizable info_hash column (tried: info_hash, infohash, hash, btih)")
 		}
-		// ReuseRecord is true, so we must copy the peeked row before the
-		// next Read() overwrites it.
-		peekedRow = make([]string, len(peek))
-		copy(peekedRow, peek)
+		peekedRow = peek
 	}
 
-	// Helper to find optional columns.
 	findCol := func(names ...string) int {
 		for _, n := range names {
 			if idx, ok := colIdx[n]; ok {
@@ -216,12 +222,9 @@ func ParseCSV(r io.Reader) ([]ParsedItem, error) {
 		return item, true
 	}
 
-	var items []ParsedItem
-
-	// Process the peeked row if we consumed one during auto-detection.
 	if peekedRow != nil {
 		if item, ok := parseRow(peekedRow); ok {
-			items = append(items, item)
+			fn(item)
 		}
 	}
 
@@ -231,13 +234,22 @@ func ParseCSV(r io.Reader) ([]ParsedItem, error) {
 			break
 		}
 		if err != nil {
-			continue // skip malformed rows
+			continue
 		}
 		if item, ok := parseRow(record); ok {
-			items = append(items, item)
+			fn(item)
 		}
 	}
-	return items, nil
+	return nil
+}
+
+// ParseCSV reads a CSV file into a slice (convenience wrapper).
+func ParseCSV(r io.Reader) ([]ParsedItem, error) {
+	var items []ParsedItem
+	err := ParseCSVStream(r, func(item ParsedItem) {
+		items = append(items, item)
+	})
+	return items, err
 }
 
 // ndjsonItem is the JSON structure accepted from NDJSON files.
@@ -253,13 +265,11 @@ type ndjsonItem struct {
 	PublishedAt string `json:"PublishedAt"`
 }
 
-// ParseNDJSON reads newline-delimited JSON.
-func ParseNDJSON(r io.Reader) ([]ParsedItem, error) {
+// ParseNDJSONStream reads newline-delimited JSON, calling fn for each valid item.
+func ParseNDJSONStream(r io.Reader, fn func(ParsedItem)) error {
 	scanner := bufio.NewScanner(r)
-	// Allow up to 1 MB per line.
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 
-	var items []ParsedItem
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" {
@@ -267,7 +277,7 @@ func ParseNDJSON(r io.Reader) ([]ParsedItem, error) {
 		}
 		var raw ndjsonItem
 		if err := json.Unmarshal([]byte(line), &raw); err != nil {
-			continue // skip malformed lines
+			continue
 		}
 		hash := strings.ToLower(strings.TrimSpace(raw.InfoHash))
 		if !validInfoHash(hash) {
@@ -288,12 +298,18 @@ func ParseNDJSON(r io.Reader) ([]ParsedItem, error) {
 				item.PublishedAt = t
 			}
 		}
+		fn(item)
+	}
+	return scanner.Err()
+}
+
+// ParseNDJSON reads newline-delimited JSON into a slice (convenience wrapper).
+func ParseNDJSON(r io.Reader) ([]ParsedItem, error) {
+	var items []ParsedItem
+	err := ParseNDJSONStream(r, func(item ParsedItem) {
 		items = append(items, item)
-	}
-	if err := scanner.Err(); err != nil {
-		return items, fmt.Errorf("scanning NDJSON: %w", err)
-	}
-	return items, nil
+	})
+	return items, err
 }
 
 // sqlInsertRe matches INSERT INTO ... VALUES lines and extracts the values portion.
@@ -302,14 +318,11 @@ var sqlInsertRe = regexp.MustCompile(`(?i)INSERT\s+INTO\s+\S+\s*(?:\([^)]*\))?\s
 // sqlValueRe extracts individual value tuples from an INSERT VALUES clause.
 var sqlValueRe = regexp.MustCompile(`\(([^)]+)\)`)
 
-// ParseSQL extracts torrent data from SQL INSERT statements.
-// It scans for 40-char hex hashes in value tuples and extracts
-// adjacent string fields as the torrent name and numeric fields as size.
-func ParseSQL(r io.Reader) ([]ParsedItem, error) {
+// ParseSQLStream extracts torrent data from SQL INSERT statements, calling fn for each.
+func ParseSQLStream(r io.Reader, fn func(ParsedItem)) error {
 	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, 0, 64*1024), 10*1024*1024) // 10 MB lines for big INSERTs
 
-	var items []ParsedItem
 	for scanner.Scan() {
 		line := scanner.Text()
 		match := sqlInsertRe.FindStringSubmatch(line)
@@ -324,14 +337,20 @@ func ParseSQL(r io.Reader) ([]ParsedItem, error) {
 			fields := strings.Split(tuple[1], ",")
 			item := parseSQLTuple(fields)
 			if item.InfoHash != "" {
-				items = append(items, item)
+				fn(item)
 			}
 		}
 	}
-	if err := scanner.Err(); err != nil {
-		return items, fmt.Errorf("scanning SQL: %w", err)
-	}
-	return items, nil
+	return scanner.Err()
+}
+
+// ParseSQL extracts torrent data from SQL INSERT statements (convenience wrapper).
+func ParseSQL(r io.Reader) ([]ParsedItem, error) {
+	var items []ParsedItem
+	err := ParseSQLStream(r, func(item ParsedItem) {
+		items = append(items, item)
+	})
+	return items, err
 }
 
 // parseSQLTuple extracts torrent data from a SQL value tuple's fields.
@@ -361,45 +380,50 @@ func isNumeric(s string) bool {
 	return err == nil
 }
 
-// Analyze parses the given data and returns category/count summary.
-func Analyze(data []byte) AnalysisResult {
-	format := DetectFormat(data)
-	reader := strings.NewReader(string(data))
-
-	var items []ParsedItem
-	var parseErr error
-
-	switch format {
-	case FormatNDJSON:
-		items, parseErr = ParseNDJSON(reader)
-	case FormatSQL:
-		items, parseErr = ParseSQL(reader)
-	default:
-		items, parseErr = ParseCSV(reader)
-	}
+// AnalyzeStream reads from r without loading the entire file into memory.
+// It detects the format from the first 4KB, then streams through counting
+// categories and total rows.
+func AnalyzeStream(r io.Reader) AnalysisResult {
+	format, combined := DetectFormatFromReader(r)
 
 	result := AnalysisResult{
 		Format:     format,
 		Categories: make(map[string]int),
 	}
+
+	// Use a callback-based parse to avoid holding all items in memory.
+	var parseErr error
+	switch format {
+	case FormatNDJSON:
+		parseErr = ParseNDJSONStream(combined, func(item ParsedItem) {
+			result.TotalRows++
+			catKey := "unknown"
+			if item.ContentType.Valid {
+				catKey = string(item.ContentType.ContentType)
+			}
+			result.Categories[catKey]++
+		})
+	case FormatSQL:
+		parseErr = ParseSQLStream(combined, func(item ParsedItem) {
+			result.TotalRows++
+			catKey := "unknown"
+			if item.ContentType.Valid {
+				catKey = string(item.ContentType.ContentType)
+			}
+			result.Categories[catKey]++
+		})
+	default:
+		parseErr = ParseCSVStream(combined, func(item ParsedItem) {
+			result.TotalRows++
+			catKey := "unknown"
+			if item.ContentType.Valid {
+				catKey = string(item.ContentType.ContentType)
+			}
+			result.Categories[catKey]++
+		})
+	}
 	if parseErr != nil {
 		result.Errors++
-	}
-
-	for _, item := range items {
-		result.TotalRows++
-		if item.ContentType.Valid {
-			result.Categories[string(item.ContentType.ContentType)]++
-		} else {
-			result.Categories["unknown"]++
-		}
-	}
-
-	// Keep up to 5 sample rows.
-	if len(items) > 5 {
-		result.SampleRows = items[:5]
-	} else {
-		result.SampleRows = items
 	}
 
 	return result
