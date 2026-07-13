@@ -16,11 +16,12 @@ ENV SERVICE=bitmagnet
 
 WORKDIR /src
 
-# Cache Go modules
+# Cache Go modules, then tidy to resolve any new transitive deps.
 COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . ./
+RUN go mod tidy
 
 # Replace any committed webui/dist with the freshly built frontend
 RUN rm -rf webui/dist
