@@ -14,6 +14,7 @@ import (
 	"github.com/bitmagnet-io/bitmagnet/internal/config/configfx"
 	"github.com/bitmagnet-io/bitmagnet/internal/database/databasefx"
 	"github.com/bitmagnet-io/bitmagnet/internal/database/migrations"
+	"github.com/bitmagnet-io/bitmagnet/internal/dbimport/dbimportfx"
 	"github.com/bitmagnet-io/bitmagnet/internal/dbtrim/dbtrimfx"
 	"github.com/bitmagnet-io/bitmagnet/internal/omdb/omdbfx"
 	"github.com/bitmagnet-io/bitmagnet/internal/dhtcrawler/dhtcrawlerfx"
@@ -44,6 +45,7 @@ func New() fx.Option {
 		blockingfx.New(),
 		classifierfx.New(),
 		configfx.New(),
+		dbimportfx.New(),
 		dbtrimfx.New(),
 		omdbfx.New(),
 		dhtcrawlerfx.New(),

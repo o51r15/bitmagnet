@@ -1,0 +1,78 @@
+.import-container {
+  padding: 16px;
+  max-width: 800px;
+  margin: 0 auto;
+
+  h2 {
+    margin-bottom: 16px;
+  }
+}
+
+.upload-card {
+  margin-bottom: 16px;
+
+  .upload-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+
+  .file-name {
+    color: var(--mdc-theme-text-secondary-on-background, #666);
+    font-size: 0.9em;
+  }
+}
+
+.config-card {
+  margin-bottom: 16px;
+
+  .source-name-field {
+    width: 100%;
+    margin-top: 16px;
+  }
+
+  .categories-section {
+    margin-top: 16px;
+  }
+
+  .categories-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+  }
+
+  .categories-label {
+    font-weight: 500;
+    flex: 1;
+  }
+
+  .categories-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 4px;
+  }
+}
+
+.state-card {
+  max-width: 540px;
+
+  mat-card-content {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+}
+
+.error-card {
+  margin-bottom: 16px;
+}
+
+.result-card {
+  mat-card-avatar {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+}

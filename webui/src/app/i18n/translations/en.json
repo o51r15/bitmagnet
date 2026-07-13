@@ -233,7 +233,8 @@
     "queues": "Queues",
     "torrents": "Torrents",
     "visualize": "Visualize",
-    "prowlarr": "Prowlarr"
+    "prowlarr": "Prowlarr",
+    "import": "Import"
   },
   "torrents": {
     "classification": "Classification",

@@ -91,6 +91,11 @@ export const routes: Routes = [
       import("./prowlarr/prowlarr.component").then((c) => c.ProwlarrComponent),
   },
   {
+    path: "import",
+    loadComponent: () =>
+      import("./import/import.component").then((c) => c.ImportComponent),
+  },
+  {
     path: "**",
     loadComponent: () =>
       import("./not-found/not-found.component").then(

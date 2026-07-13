@@ -1,0 +1,164 @@
+<ng-container *transloco="let t">
+  <app-document-title [parts]="['Import']" />
+  <div class="import-container">
+    <h2>Database Import</h2>
+
+    @if (error()) {
+      <mat-card class="state-card error-card">
+        <mat-card-content>
+          <mat-icon color="warn">error</mat-icon>
+          <span>{{ error() }}</span>
+        </mat-card-content>
+      </mat-card>
+    }
+
+    <!-- Phase: Upload -->
+    @if (phase() === 'upload' || phase() === 'analyze') {
+      <mat-card class="upload-card">
+        <mat-card-content>
+          <p>
+            Upload a torrent database file (CSV, NDJSON, or SQL dump).
+            The file will be analyzed to detect its format and
+            content categories.
+          </p>
+          <div class="upload-row">
+            <button mat-raised-button (click)="fileInput.click()">
+              <mat-icon>upload_file</mat-icon>
+              Choose File
+            </button>
+            <input
+              #fileInput
+              type="file"
+              accept=".csv,.json,.ndjson,.jsonl,.sql"
+              (change)="onFileSelected($event)"
+              hidden
+            />
+            @if (selectedFile()) {
+              <span class="file-name">{{ selectedFile()!.name }}</span>
+            }
+          </div>
+          <button
+            mat-flat-button
+            color="primary"
+            [disabled]="!selectedFile() || analyzing()"
+            (click)="analyzeFile()"
+          >
+            @if (analyzing()) {
+              <mat-spinner diameter="20" />
+            } @else {
+              <mat-icon>analytics</mat-icon>
+            }
+            {{ analyzing() ? 'Analyzing...' : 'Analyze' }}
+          </button>
+        </mat-card-content>
+      </mat-card>
+    }
+
+    <!-- Phase: Configure -->
+    @if (phase() === 'configure') {
+      <mat-card class="config-card">
+        <mat-card-header>
+          <mat-icon mat-card-avatar>description</mat-icon>
+          <mat-card-title>Analysis Complete</mat-card-title>
+          <mat-card-subtitle>
+            Format: {{ analysis()!.format | uppercase }} &middot;
+            {{ analysis()!.totalRows }} torrents found
+          </mat-card-subtitle>
+        </mat-card-header>
+        <mat-card-content>
+          <!-- Source Name -->
+          <mat-form-field appearance="outline" class="source-name-field">
+            <mat-label>Source Name</mat-label>
+            <input
+              matInput
+              placeholder="e.g. my-database"
+              [value]="sourceName()"
+              (input)="sourceName.set($any($event.target).value)"
+              maxlength="64"
+              pattern="[a-zA-Z0-9_-]+"
+            />
+            <mat-hint>
+              Letters, numbers, hyphens, underscores only.
+              Will appear as "import-{{ sourceName() || '...' }}"
+            </mat-hint>
+          </mat-form-field>
+
+          <!-- Categories -->
+          <div class="categories-section">
+            <div class="categories-header">
+              <span class="categories-label">Categories</span>
+              <button mat-button (click)="selectAll()">Select All</button>
+              <button mat-button (click)="deselectAll()">Deselect All</button>
+            </div>
+            <div class="categories-grid">
+              @for (cat of categories(); track cat.key) {
+                <mat-checkbox
+                  [checked]="cat.selected"
+                  (change)="toggleCategory(cat.key)"
+                >
+                  {{ cat.key }} ({{ cat.count }})
+                </mat-checkbox>
+              }
+            </div>
+          </div>
+        </mat-card-content>
+        <mat-card-actions>
+          <button mat-button (click)="reset()">
+            <mat-icon>arrow_back</mat-icon> Back
+          </button>
+          <button
+            mat-flat-button
+            color="primary"
+            [disabled]="!sourceName().trim() || importing()"
+            (click)="executeImport()"
+          >
+            <mat-icon>download</mat-icon>
+            Import
+          </button>
+        </mat-card-actions>
+      </mat-card>
+    }
+
+    <!-- Phase: Importing -->
+    @if (phase() === 'importing') {
+      <mat-card class="state-card">
+        <mat-card-content>
+          <mat-spinner diameter="40" />
+          <span>Importing torrents...</span>
+        </mat-card-content>
+      </mat-card>
+    }
+
+    <!-- Phase: Done -->
+    @if (phase() === 'done' && importResult()) {
+      <mat-card class="result-card">
+        <mat-card-header>
+          <mat-icon mat-card-avatar color="primary">check_circle</mat-icon>
+          <mat-card-title>Import Complete</mat-card-title>
+          <mat-card-subtitle>
+            Source: {{ importResult()!.source }}
+          </mat-card-subtitle>
+        </mat-card-header>
+        <mat-card-content>
+          <p>
+            <strong>{{ importResult()!.imported }}</strong> torrents imported,
+            <strong>{{ importResult()!.skipped }}</strong> skipped.
+          </p>
+          <p>
+            Torrents will be queued for TMDB/OMDb classification
+            automatically. Check the Dashboard for progress.
+          </p>
+        </mat-card-content>
+        <mat-card-actions>
+          <button mat-button (click)="reset()">
+            <mat-icon>add</mat-icon> Import Another
+          </button>
+          <a mat-button routerLink="/torrents"
+            [queryParams]="{ facets: 'torrent_source', torrent_source: importResult()!.source }">
+            <mat-icon>search</mat-icon> View Torrents
+          </a>
+        </mat-card-actions>
+      </mat-card>
+    }
+  </div>
+</ng-container>

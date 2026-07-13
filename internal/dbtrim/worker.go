@@ -61,12 +61,31 @@ func (w *trimWorker) runTrim(ctx context.Context) {
 	// Collect Prowlarr-protected info_hashes if enabled.
 	var protectedHashes map[string]struct{}
 	if w.config.ProtectProwlarrSources {
-		protectedHashes, err = w.getProwlarrProtectedHashes(ctx, db)
+		protectedHashes, err = w.getProtectedHashes(ctx, db, "prowlarr%")
 		if err != nil {
 			w.logger.Errorw("db_trim: failed to get Prowlarr-protected hashes", "error", err)
 			return
 		}
 		w.logger.Infow("db_trim: Prowlarr protection active", "protected_hashes", len(protectedHashes))
+	}
+
+	// Collect import-protected info_hashes if enabled.
+	if w.config.ProtectImportedSources {
+		importHashes, importErr := w.getProtectedHashes(ctx, db, "import-%")
+		if importErr != nil {
+			w.logger.Errorw("db_trim: failed to get import-protected hashes", "error", importErr)
+			return
+		}
+		if len(importHashes) > 0 {
+			if protectedHashes == nil {
+				protectedHashes = importHashes
+			} else {
+				for h := range importHashes {
+					protectedHashes[h] = struct{}{}
+				}
+			}
+			w.logger.Infow("db_trim: import protection active", "protected_hashes", len(importHashes))
+		}
 	}
 
 	totalRemoved := 0
@@ -110,13 +129,13 @@ func (w *trimWorker) configForSource(source string) SourceTrimConfig {
 	return SourceTrimConfig{Source: source, MaxAgeDays: -1, MinSeeds: -1, IgnoreNoSeedData: true}
 }
 
-// getProwlarrProtectedHashes returns a set of info_hashes that exist in any
-// Prowlarr source (source key starts with "prowlarr").
-func (w *trimWorker) getProwlarrProtectedHashes(ctx context.Context, db *gorm.DB) (map[string]struct{}, error) {
+// getProtectedHashes returns a set of info_hashes that exist in any
+// source matching the given LIKE pattern (e.g. "prowlarr%", "import-%").
+func (w *trimWorker) getProtectedHashes(ctx context.Context, db *gorm.DB, pattern string) (map[string]struct{}, error) {
 	var hashes []string
 	if err := db.WithContext(ctx).
 		Table("torrents_torrent_sources").
-		Where("source LIKE 'prowlarr%'").
+		Where("source LIKE ?", pattern).
 		Distinct("info_hash").
 		Pluck("info_hash", &hashes).Error; err != nil {
 		return nil, err

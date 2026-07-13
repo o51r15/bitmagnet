@@ -39,6 +39,16 @@
           <mat-icon>rss_feed</mat-icon>
           {{ t("routes.prowlarr") }}
         </a>
+        <a
+          mat-button
+          routerLink="import"
+          #linkImport="routerLinkActive"
+          routerLinkActive
+          [class]="linkImport.isActive ? 'active' : ''"
+        >
+          <mat-icon>upload_file</mat-icon>
+          {{ t("routes.import") }}
+        </a>
       </nav>
     } @else {
       <h1>
@@ -65,6 +75,16 @@
         [matTooltip]="t('routes.prowlarr')"
       >
         <mat-icon>rss_feed</mat-icon>
+      </button>
+      <button
+        mat-icon-button
+        routerLink="import"
+        #linkImport="routerLinkActive"
+        routerLinkActive
+        [class]="linkImport.isActive ? 'active' : ''"
+        [matTooltip]="t('routes.import')"
+      >
+        <mat-icon>upload_file</mat-icon>
       </button>
     }
     <span class="spacer"></span>

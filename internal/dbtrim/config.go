@@ -11,6 +11,9 @@ type Config struct {
 	// ProtectProwlarrSources when true prevents trimming any torrent that also
 	// exists in a Prowlarr source, regardless of other sources' trim rules.
 	ProtectProwlarrSources bool `yaml:"protect_prowlarr_sources"`
+	// ProtectImportedSources when true prevents trimming any torrent that also
+	// exists in an imported source (source key starts with "import-").
+	ProtectImportedSources bool `yaml:"protect_imported_sources"`
 	// Sources lists per-source trim rules. The special source name "default"
 	// applies to any source not explicitly listed.
 	Sources []SourceTrimConfig `yaml:"sources"`
@@ -37,6 +40,7 @@ func NewDefaultConfig() Config {
 		Enabled:                false,
 		DryRun:                 false,
 		ProtectProwlarrSources: true,
+		ProtectImportedSources: true,
 		Sources: []SourceTrimConfig{
 			{
 				Source:           "default",
