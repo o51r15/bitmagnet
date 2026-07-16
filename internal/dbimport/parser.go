@@ -257,7 +257,7 @@ func ParseCSVStream(r io.Reader, fn func(ParsedItem)) error {
 		return -1
 	}
 	nameCol := findCol("name", "title", "torrent_name")
-	sizeCol := findCol("size", "length", "total_size", "size(bytes)")
+	sizeCol := findCol("size", "length", "total_size")
 	catCol := findCol("category", "content_type", "type", "cat")
 	seedCol := findCol("seeders", "seeds", "seed")
 	leechCol := findCol("leechers", "leech", "peers")
@@ -334,15 +334,22 @@ func ParseCSVStream(r io.Reader, fn func(ParsedItem)) error {
 	return nil
 }
 
-// parseDateFlexible tries multiple date formats including natural language dates.
+// parseDateFlexible tries multiple date formats, Unix timestamps, and natural language dates.
 func parseDateFlexible(s string) time.Time {
 	s = strings.TrimSpace(s)
+	if s == "" {
+		return time.Time{}
+	}
+	// Try as Unix timestamp (integer seconds).
+	if n, err := strconv.ParseInt(s, 10, 64); err == nil && n > 946684800 && n < 2208988800 {
+		return time.Unix(n, 0).UTC()
+	}
 	for _, layout := range []string{
 		time.RFC3339,
 		"2006-01-02 15:04:05",
 		"2006-01-02",
-		"2006-Jan-02 15:04:05",       // 2015-Oct-27 04:10:22
-		"02 Jan 2006 15:04:05",       // common log format
+		"2006-Jan-02 15:04:05", // 2015-Oct-27 04:10:22
+		"02 Jan 2006 15:04:05", // common log format
 	} {
 		if t, err := time.Parse(layout, s); err == nil {
 			return t
@@ -420,32 +427,165 @@ func ParseNDJSON(r io.Reader) ([]ParsedItem, error) {
 	return items, err
 }
 
-// sqlInsertRe matches INSERT INTO ... VALUES lines.
-var sqlInsertRe = regexp.MustCompile(`(?i)INSERT\s+INTO\s+\S+\s*(?:\([^)]*\))?\s*VALUES\s*`)
+// sqlInsertRe matches INSERT INTO ... VALUES lines, capturing the optional column list.
+var sqlInsertRe = regexp.MustCompile(`(?i)INSERT\s+INTO\s+\S+\s*(\([^)]*\))?\s*VALUES\s*`)
+
+// sqlColumnMapping holds the column-name-to-index mapping parsed from an INSERT statement.
+type sqlColumnMapping struct {
+	hashCol int
+	nameCol int
+	sizeCol int
+	catCol  int
+	dateCol int
+}
+
+// parseSQLColumnList extracts column names from the INSERT's column list and maps them.
+// Returns nil if there's no column list or no hash column found.
+func parseSQLColumnList(colList string) *sqlColumnMapping {
+	// colList looks like: (`id`, `name`, `description`, `category_id`, `size`, `hash`, ...)
+	colList = strings.Trim(colList, "()")
+	if colList == "" {
+		return nil
+	}
+	m := &sqlColumnMapping{hashCol: -1, nameCol: -1, sizeCol: -1, catCol: -1, dateCol: -1}
+	for i, col := range strings.Split(colList, ",") {
+		col = strings.TrimSpace(col)
+		col = strings.Trim(col, "`\"[] ")
+		col = strings.ToLower(col)
+		switch {
+		case matchesAny(col, "hash", "info_hash", "infohash", "btih"):
+			m.hashCol = i
+		case matchesAny(col, "name", "title", "torrent_name"):
+			m.nameCol = i
+		case matchesAny(col, "size", "length", "total_size"):
+			m.sizeCol = i
+		case matchesAny(col, "tags", "content_type", "type", "category", "cat"):
+			m.catCol = i
+		case matchesAny(col, "date", "dt", "published", "published_at", "added", "created_at"):
+			m.dateCol = i
+		}
+	}
+	if m.hashCol < 0 {
+		return nil
+	}
+	return m
+}
 
 // ParseSQLStream extracts torrent data from SQL INSERT statements, calling fn for each.
 // Handles quoted strings containing commas and parentheses correctly.
+// Supports both single-line INSERTs and multi-line INSERTs where VALUES is on one
+// line and tuples follow on subsequent lines (phpMyAdmin dumps).
 func ParseSQLStream(r io.Reader, fn func(ParsedItem)) error {
 	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, 0, 64*1024), 10*1024*1024) // 10 MB lines for big INSERTs
 
+	inMultiLineInsert := false
+	var colMap *sqlColumnMapping // parsed from INSERT column list
+
 	for scanner.Scan() {
 		line := scanner.Text()
-		loc := sqlInsertRe.FindStringIndex(line)
-		if loc == nil {
+
+		if match := sqlInsertRe.FindStringSubmatch(line); match != nil {
+			loc := sqlInsertRe.FindStringIndex(line)
+			// match[1] is the optional column list.
+			if match[1] != "" {
+				colMap = parseSQLColumnList(match[1])
+			} else {
+				colMap = nil
+			}
+			valuesPart := strings.TrimSpace(line[loc[1]:])
+			if valuesPart == "" {
+				// Multi-line INSERT: VALUES is at end of line, tuples follow.
+				inMultiLineInsert = true
+				continue
+			}
+			// Single-line INSERT with values on same line.
+			parseSQLTuplesAndEmit(valuesPart, colMap, fn)
+			inMultiLineInsert = false
 			continue
 		}
-		valuesPart := line[loc[1]:]
-		// Extract tuples respecting SQL quoting.
-		tuples := extractSQLTuples(valuesPart)
-		for _, fields := range tuples {
-			item := parseSQLTuple(fields)
-			if item.InfoHash != "" {
-				fn(item)
+
+		if inMultiLineInsert {
+			trimmed := strings.TrimSpace(line)
+			if trimmed == "" {
+				continue
+			}
+			// Tuple continuation lines start with '('.
+			if trimmed[0] == '(' {
+				parseSQLTuplesAndEmit(trimmed, colMap, fn)
+			} else {
+				// Non-tuple line (e.g. a new statement) ends the multi-line INSERT.
+				inMultiLineInsert = false
 			}
 		}
 	}
 	return scanner.Err()
+}
+
+func parseSQLTuplesAndEmit(valuesPart string, colMap *sqlColumnMapping, fn func(ParsedItem)) {
+	tuples := extractSQLTuples(valuesPart)
+	for _, fields := range tuples {
+		var item ParsedItem
+		if colMap != nil {
+			item = parseSQLTupleWithMapping(fields, colMap)
+		} else {
+			item = parseSQLTuple(fields)
+		}
+		if item.InfoHash != "" {
+			fn(item)
+		}
+	}
+}
+
+// parseSQLTupleWithMapping extracts torrent data using known column positions.
+func parseSQLTupleWithMapping(fields []string, m *sqlColumnMapping) ParsedItem {
+	var item ParsedItem
+	getField := func(idx int) string {
+		if idx >= 0 && idx < len(fields) {
+			f := strings.TrimSpace(fields[idx])
+			if strings.EqualFold(f, "null") {
+				return ""
+			}
+			return f
+		}
+		return ""
+	}
+
+	raw := getField(m.hashCol)
+	if raw == "" {
+		return item
+	}
+
+	// Try bytea hex format first.
+	switch {
+	case strings.HasPrefix(raw, "\\x") && len(raw) == 42:
+		item.InfoHash = strings.ToLower(raw[2:])
+	case strings.HasPrefix(raw, "x") && len(raw) == 41:
+		item.InfoHash = strings.ToLower(raw[1:])
+	default:
+		if validInfoHash(raw) {
+			item.InfoHash = strings.ToLower(raw)
+		}
+	}
+	if item.InfoHash == "" {
+		return item
+	}
+
+	if v := getField(m.nameCol); v != "" {
+		item.Name = v
+	}
+	if v := getField(m.sizeCol); v != "" {
+		if n, err := strconv.ParseUint(v, 10, 64); err == nil {
+			item.Size = uint(n)
+		}
+	}
+	if v := getField(m.catCol); v != "" {
+		item.ContentType = parseContentType(v)
+	}
+	if v := getField(m.dateCol); v != "" {
+		item.PublishedAt = parseDateFlexible(v)
+	}
+	return item
 }
 
 // extractSQLTuples parses "(val1, val2, ...),(val1, val2, ...)" respecting
@@ -543,29 +683,60 @@ func ParseSQL(r io.Reader) ([]ParsedItem, error) {
 
 // parseSQLTuple extracts torrent data from a SQL value tuple's fields.
 // Fields have already been unquoted by extractSQLFields.
+// Uses a two-pass approach: first find the hash field, then scan all other
+// fields for name, size, etc. This handles schemas where name precedes hash.
 func parseSQLTuple(fields []string) ParsedItem {
 	var item ParsedItem
-	for _, f := range fields {
+	hashIdx := -1
+
+	// Pass 1: find the info_hash field.
+	for i, f := range fields {
 		f = strings.TrimSpace(f)
 		if strings.EqualFold(f, "null") || f == "" {
 			continue
 		}
 
-		// Check for Postgres bytea hex format: \xbfd30e91...
-		if strings.HasPrefix(f, "\\x") && len(f) == 42 {
-			hexStr := f[2:]
-			if validInfoHash(hexStr) && item.InfoHash == "" {
-				item.InfoHash = strings.ToLower(hexStr)
-				continue
-			}
+		// Check for Postgres bytea hex format.
+		var hexStr string
+		switch {
+		case strings.HasPrefix(f, "\\x") && len(f) == 42:
+			hexStr = f[2:]
+		case strings.HasPrefix(f, "x") && len(f) == 41:
+			hexStr = f[1:]
+		}
+		if hexStr != "" && validInfoHash(hexStr) {
+			item.InfoHash = strings.ToLower(hexStr)
+			hashIdx = i
+			break
 		}
 
-		if validInfoHash(f) && item.InfoHash == "" {
+		if validInfoHash(f) {
 			item.InfoHash = strings.ToLower(f)
-		} else if item.InfoHash != "" && item.Name == "" && len(f) > 2 && !isNumeric(f) {
+			hashIdx = i
+			break
+		}
+	}
+
+	if hashIdx < 0 {
+		return item
+	}
+
+	// Pass 2: scan all fields (except hash and obvious ID/status fields) for name and size.
+	for i, f := range fields {
+		if i == hashIdx {
+			continue
+		}
+		f = strings.TrimSpace(f)
+		if strings.EqualFold(f, "null") || f == "" {
+			continue
+		}
+
+		if item.Name == "" && len(f) > 2 && !isNumeric(f) {
+			// Skip very short single-digit strings (likely category_id, status fields).
 			item.Name = f
-		} else if item.InfoHash != "" && isNumeric(f) && item.Size == 0 {
-			if n, err := strconv.ParseUint(f, 10, 64); err == nil && n > 0 {
+		} else if item.Size == 0 && isNumeric(f) {
+			if n, err := strconv.ParseUint(f, 10, 64); err == nil && n > 100000 {
+				// Only accept sizes > 100KB to avoid picking up IDs/counts.
 				item.Size = uint(n)
 			}
 		}

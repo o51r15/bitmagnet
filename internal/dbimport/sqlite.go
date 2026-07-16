@@ -211,18 +211,6 @@ func getColumnInfo(db *sql.DB, table string) []columnInfo {
 	return cols
 }
 
-// Kept for backward compat — callers that only need the simple path.
-func discoverTable(db *sql.DB) (*sqliteTableInfo, error) {
-	disc, err := discoverSchema(db)
-	if err != nil {
-		return nil, err
-	}
-	if disc.mode != sqliteModeSimple {
-		return nil, fmt.Errorf("database uses torrent BLOB schema, not simple hash columns")
-	}
-	return disc.info, nil
-}
-
 func tryMapColumns(db *sql.DB, table string) *sqliteTableInfo {
 	rows, err := db.Query(fmt.Sprintf("PRAGMA table_info(%s)", table))
 	if err != nil {
@@ -381,7 +369,7 @@ func parseSQLiteTorrentBlob(db *sql.DB, disc *sqliteDiscovery, fn func(ParsedIte
 
 	// Build the query joining metadata and blob tables.
 	var selectCols []string
-	selectCols = append(selectCols, fmt.Sprintf("b.file"))
+	selectCols = append(selectCols, "b.file")
 	if disc.nameCol != "" {
 		selectCols = append(selectCols, fmt.Sprintf("m.%s", disc.nameCol))
 	}
@@ -447,9 +435,8 @@ func parseSQLiteTorrentBlob(db *sql.DB, disc *sqliteDiscovery, fn func(ParsedIte
 		if catVal.Valid {
 			// TPB uses numeric category IDs — try lookup.
 			catStr := catVal.String
-			if catID, err := fmt.Sscanf(catStr, "%d", new(int)); err == nil && catID > 0 {
-				var numID int
-				fmt.Sscanf(catStr, "%d", &numID)
+			var numID int
+			if _, err := fmt.Sscanf(catStr, "%d", &numID); err == nil && numID > 0 {
 				if title, ok := catLookup[numID]; ok {
 					item.ContentType = parseTPBCategory(numID, title)
 				} else {
@@ -571,26 +558,7 @@ func parseUint(s string) (uint64, error) {
 	return n, err
 }
 
+// parseDateFlex delegates to the unified parseDateFlexible in parser.go.
 func parseDateFlex(s string) time.Time {
-	s = strings.TrimSpace(s)
-	// Try as Unix timestamp (integer seconds).
-	if n, err := fmt.Sscanf(s, "%d", new(int64)); err == nil && n > 0 {
-		var ts int64
-		fmt.Sscanf(s, "%d", &ts)
-		// Sanity check: must be between 2000-01-01 and 2040-01-01.
-		if ts > 946684800 && ts < 2208988800 {
-			return time.Unix(ts, 0).UTC()
-		}
-	}
-	for _, layout := range []string{
-		time.RFC3339,
-		"2006-01-02 15:04:05",
-		"2006-01-02",
-		"2006-Jan-02 15:04:05",
-	} {
-		if t, err := time.Parse(layout, s); err == nil {
-			return t
-		}
-	}
-	return time.Time{}
+	return parseDateFlexible(s)
 }
