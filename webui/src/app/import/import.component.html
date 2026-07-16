@@ -119,12 +119,64 @@
       </mat-card>
     }
 
-    <!-- Phase: Importing -->
+    <!-- Phase: Importing (with live progress) -->
     @if (phase() === 'importing') {
-      <mat-card class="state-card">
+      <mat-card class="progress-card">
+        <mat-card-header>
+          <mat-icon mat-card-avatar>hourglass_top</mat-icon>
+          <mat-card-title>Import In Progress</mat-card-title>
+          @if (currentJob()) {
+            <mat-card-subtitle>
+              Source: {{ currentJob()!.source }} &middot; {{ getElapsed() }}
+            </mat-card-subtitle>
+          }
+        </mat-card-header>
         <mat-card-content>
-          <mat-spinner diameter="40" />
-          <span>Importing torrents...</span>
+          @if (currentJob(); as job) {
+            <div class="progress-details">
+              <div class="progress-phase">
+                @switch (job.phase) {
+                  @case ('uploading') {
+                    <mat-spinner diameter="24" />
+                    <span>Uploading file to server...</span>
+                  }
+                  @case ('parsing') {
+                    <mat-spinner diameter="24" />
+                    <span>Parsing file and preparing import...</span>
+                  }
+                  @case ('importing') {
+                    <mat-spinner diameter="24" />
+                    <span>Importing torrents into database...</span>
+                  }
+                }
+              </div>
+              @if (job.phase === 'importing') {
+                <div class="progress-stats">
+                  <div class="stat">
+                    <span class="stat-value">{{ formatNumber(job.imported) }}</span>
+                    <span class="stat-label">Imported</span>
+                  </div>
+                  <div class="stat">
+                    <span class="stat-value">{{ formatNumber(job.skipped) }}</span>
+                    <span class="stat-label">Skipped</span>
+                  </div>
+                  <div class="stat">
+                    <span class="stat-value">{{ formatNumber(job.imported + job.skipped) }}</span>
+                    <span class="stat-label">Processed</span>
+                  </div>
+                </div>
+              }
+            </div>
+          } @else {
+            <div class="progress-phase">
+              <mat-spinner diameter="24" />
+              <span>Starting import...</span>
+            </div>
+          }
+          <p class="progress-note">
+            This runs in the background — you can close this page and
+            come back to check progress.
+          </p>
         </mat-card-content>
       </mat-card>
     }
@@ -141,8 +193,8 @@
         </mat-card-header>
         <mat-card-content>
           <p>
-            <strong>{{ importResult()!.imported }}</strong> torrents imported,
-            <strong>{{ importResult()!.skipped }}</strong> skipped.
+            <strong>{{ formatNumber(importResult()!.imported) }}</strong> torrents imported,
+            <strong>{{ formatNumber(importResult()!.skipped) }}</strong> skipped.
           </p>
           <p>
             Torrents will be queued for TMDB/OMDb classification

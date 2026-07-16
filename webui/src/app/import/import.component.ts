@@ -3,6 +3,7 @@ import {
   Component,
   inject,
   signal,
+  OnDestroy,
 } from "@angular/core";
 import { HttpClient } from "@angular/common/http";
 import { AppModule } from "../app.module";
@@ -13,6 +14,24 @@ interface AnalysisResult {
   totalRows: number;
   categories: Record<string, number>;
   errors: number;
+}
+
+interface ImportJob {
+  id: string;
+  source: string;
+  sourceName: string;
+  phase: string;
+  total: number;
+  imported: number;
+  skipped: number;
+  error?: string;
+  startedAt: string;
+  updatedAt: string;
+}
+
+interface StatusResponse {
+  active: boolean;
+  job?: ImportJob;
 }
 
 interface CategoryOption {
@@ -29,13 +48,13 @@ interface CategoryOption {
   styleUrl: "./import.component.scss",
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
-export class ImportComponent {
+export class ImportComponent implements OnDestroy {
   private http = inject(HttpClient);
 
   // State
-  phase = signal<"upload" | "analyze" | "configure" | "importing" | "done">(
-    "upload",
-  );
+  phase = signal<
+    "upload" | "analyze" | "configure" | "importing" | "done"
+  >("upload");
   analyzing = signal(false);
   importing = signal(false);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -49,12 +68,40 @@ export class ImportComponent {
   sourceName = signal("");
   selectedFile = signal<File | null>(null);
 
-  // Import results
+  // Import job tracking
+  currentJob = signal<ImportJob | null>(null);
+
+  // Import results (for done phase)
   importResult = signal<{
     source: string;
     imported: number;
     skipped: number;
   } | null>(null);
+
+  // Polling
+  private pollTimer: ReturnType<typeof setInterval> | null = null;
+
+  constructor() {
+    // Check if there's already an import running on load.
+    this.checkExistingJob();
+  }
+
+  ngOnDestroy(): void {
+    this.stopPolling();
+  }
+
+  private checkExistingJob(): void {
+    this.http.get<StatusResponse>("/api/import/status").subscribe({
+      next: (resp) => {
+        if (resp.active && resp.job) {
+          this.currentJob.set(resp.job);
+          this.phase.set("importing");
+          this.importing.set(true);
+          this.startPolling();
+        }
+      },
+    });
+  }
 
   onFileSelected(event: Event): void {
     const input = event.target as HTMLInputElement;
@@ -131,7 +178,6 @@ export class ImportComponent {
       .filter((c) => c.selected)
       .map((c) => c.key);
 
-    // If all are selected, send empty array (= import all).
     const allSelected =
       selectedCats.length === this.categories().length;
 
@@ -150,25 +196,86 @@ export class ImportComponent {
     );
 
     this.http
-      .post<{
-        source: string;
-        imported: number;
-        skipped: number;
-      }>("/api/import/execute", formData)
+      .post<{ status: string; job: ImportJob }>(
+        "/api/import/execute",
+        formData,
+      )
       .subscribe({
         next: (result) => {
-          this.importResult.set(result);
-          this.importing.set(false);
-          this.phase.set("done");
+          this.currentJob.set(result.job);
+          this.startPolling();
         },
         error: (err) => {
-          this.error.set(
-            err.error?.error || "Import failed",
-          );
+          const errorMsg =
+            err.error?.error || "Failed to start import";
+          this.error.set(errorMsg);
           this.importing.set(false);
           this.phase.set("configure");
         },
       });
+  }
+
+  private startPolling(): void {
+    this.stopPolling();
+    this.pollTimer = setInterval(() => this.pollStatus(), 2000);
+  }
+
+  private stopPolling(): void {
+    if (this.pollTimer) {
+      clearInterval(this.pollTimer);
+      this.pollTimer = null;
+    }
+  }
+
+  private pollStatus(): void {
+    this.http.get<StatusResponse>("/api/import/status").subscribe({
+      next: (resp) => {
+        if (!resp.job) {
+          this.stopPolling();
+          return;
+        }
+
+        this.currentJob.set(resp.job);
+
+        if (resp.job.phase === "complete") {
+          this.stopPolling();
+          this.importing.set(false);
+          this.importResult.set({
+            source: resp.job.source,
+            imported: resp.job.imported,
+            skipped: resp.job.skipped,
+          });
+          this.phase.set("done");
+        } else if (resp.job.phase === "failed") {
+          this.stopPolling();
+          this.importing.set(false);
+          this.error.set(resp.job.error || "Import failed");
+          this.phase.set("configure");
+          this.currentJob.set(null);
+        }
+      },
+      error: () => {
+        // Network error — keep polling, it might recover.
+      },
+    });
+  }
+
+  /** Format a number with commas. */
+  formatNumber(n: number): string {
+    return n.toLocaleString();
+  }
+
+  /** Elapsed time since job started. */
+  getElapsed(): string {
+    const job = this.currentJob();
+    if (!job) return "";
+    const start = new Date(job.startedAt).getTime();
+    const now = Date.now();
+    const secs = Math.floor((now - start) / 1000);
+    if (secs < 60) return `${secs}s`;
+    const mins = Math.floor(secs / 60);
+    const remSecs = secs % 60;
+    return `${mins}m ${remSecs}s`;
   }
 
   reset(): void {
@@ -178,6 +285,8 @@ export class ImportComponent {
     this.sourceName.set("");
     this.selectedFile.set(null);
     this.importResult.set(null);
+    this.currentJob.set(null);
     this.error.set(null);
+    this.stopPolling();
   }
 }

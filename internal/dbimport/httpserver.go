@@ -1,12 +1,15 @@
 package dbimport
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/bitmagnet-io/bitmagnet/internal/httpserver"
@@ -40,10 +43,28 @@ func NewHTTPServer(p Params) Result {
 	}
 }
 
+// importJob tracks the state of an async import operation.
+type importJob struct {
+	ID         string    `json:"id"`
+	Source     string    `json:"source"`
+	SourceName string    `json:"sourceName"`
+	Phase      string    `json:"phase"` // "uploading", "parsing", "importing", "complete", "failed"
+	Total      int64     `json:"total"`
+	Imported   int64     `json:"imported"`
+	Skipped    int64     `json:"skipped"`
+	Error      string    `json:"error,omitempty"`
+	StartedAt  time.Time `json:"startedAt"`
+	UpdatedAt  time.Time `json:"updatedAt"`
+}
+
 type handler struct {
 	config   Config
 	importer lazy.Lazy[importer.Importer]
 	logger   *zap.SugaredLogger
+
+	// Singleton job — only one import at a time.
+	mu         sync.Mutex
+	currentJob *importJob
 }
 
 func (*handler) Key() string { return "dbimport_api" }
@@ -51,6 +72,7 @@ func (*handler) Key() string { return "dbimport_api" }
 func (h *handler) Apply(e *gin.Engine) error {
 	e.POST("/api/import/analyze", h.handleAnalyze)
 	e.POST("/api/import/execute", h.handleExecute)
+	e.GET("/api/import/status", h.handleStatus)
 	return nil
 }
 
@@ -102,10 +124,23 @@ type executeRequest struct {
 	Categories []string `json:"categories"` // empty = all
 }
 
-// handleExecute accepts a multipart upload with a JSON "config" field and
-// "file" field. It parses the file, filters by selected categories, and
-// imports torrents using the importer pipeline with throttled classification.
+// handleExecute accepts a multipart upload, saves the file to disk, and
+// launches an async background import. Returns immediately with a job ID.
+// Only one import can run at a time.
 func (h *handler) handleExecute(c *gin.Context) {
+	// Check if an import is already running.
+	h.mu.Lock()
+	if h.currentJob != nil && (h.currentJob.Phase == "uploading" || h.currentJob.Phase == "parsing" || h.currentJob.Phase == "importing") {
+		job := *h.currentJob
+		h.mu.Unlock()
+		c.JSON(http.StatusConflict, gin.H{
+			"error": fmt.Sprintf("an import is already in progress (source: %s, %d imported so far)", job.Source, job.Imported),
+			"job":   job,
+		})
+		return
+	}
+	h.mu.Unlock()
+
 	// Parse the config JSON from the multipart form.
 	configJSON := c.PostForm("config")
 	if configJSON == "" {
@@ -119,7 +154,7 @@ func (h *handler) handleExecute(c *gin.Context) {
 		return
 	}
 
-	// Validate source name: alphanumeric, hyphens, underscores only.
+	// Validate source name.
 	sourceName := strings.TrimSpace(req.SourceName)
 	if sourceName == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "sourceName is required"})
@@ -137,36 +172,121 @@ func (h *handler) handleExecute(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "no file uploaded"})
 		return
 	}
-	defer file.Close()
 
-	// Get the importer before we start streaming.
-	imp, err := h.importer.Get()
-	if err != nil {
-		h.logger.Errorw("dbimport: failed to get importer", "error", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "importer unavailable"})
+	// Create the job before saving — this locks out other imports.
+	now := time.Now()
+	sourceKey := "import-" + sourceName
+	jobID := fmt.Sprintf("import-%s-%d", sourceName, now.Unix())
+	job := &importJob{
+		ID:         jobID,
+		Source:     sourceKey,
+		SourceName: sourceName,
+		Phase:      "uploading",
+		StartedAt:  now,
+		UpdatedAt:  now,
+	}
+
+	h.mu.Lock()
+	// Double-check under lock.
+	if h.currentJob != nil && (h.currentJob.Phase == "uploading" || h.currentJob.Phase == "parsing" || h.currentJob.Phase == "importing") {
+		existing := *h.currentJob
+		h.mu.Unlock()
+		file.Close()
+		c.JSON(http.StatusConflict, gin.H{
+			"error": fmt.Sprintf("an import is already in progress (source: %s)", existing.Source),
+			"job":   existing,
+		})
 		return
 	}
+	h.currentJob = job
+	h.mu.Unlock()
 
 	// Build category filter set.
 	catFilter := make(map[string]bool)
 	for _, cat := range req.Categories {
 		catFilter[strings.ToLower(strings.TrimSpace(cat))] = true
 	}
+
+	// Save the uploaded file to a temp file so we can close the HTTP
+	// connection and process asynchronously.
+	cr := &countingReader{r: file, limit: h.config.MaxUploadBytes}
+	tmpPath, saveErr := SaveToTemp(cr, h.config.MaxUploadBytes)
+	file.Close()
+
+	if saveErr != nil {
+		h.mu.Lock()
+		job.Phase = "failed"
+		job.Error = saveErr.Error()
+		job.UpdatedAt = time.Now()
+		h.mu.Unlock()
+
+		if strings.Contains(saveErr.Error(), "exceeds maximum size") {
+			c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": saveErr.Error()})
+		} else {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save uploaded file"})
+		}
+		return
+	}
+
+	h.logger.Infow("dbimport: file saved, starting async import",
+		"source", sourceKey,
+		"job_id", jobID,
+		"file_size", cr.n,
+	)
+
+	// Launch the import in a background goroutine.
+	go h.runImport(job, tmpPath, catFilter)
+
+	c.JSON(http.StatusAccepted, gin.H{
+		"status": "accepted",
+		"job":    job,
+	})
+}
+
+// runImport processes the saved temp file in the background.
+func (h *handler) runImport(job *importJob, tmpPath string, catFilter map[string]bool) {
+	defer os.Remove(tmpPath)
+
+	// Detect format from the saved file.
+	f, err := os.Open(tmpPath)
+	if err != nil {
+		h.setJobFailed(job, fmt.Sprintf("failed to open temp file: %v", err))
+		return
+	}
+
+	format, combined := DetectFormatFromReader(f)
+	// For non-SQLite formats, we'll read from combined (which includes the peeked bytes).
+	// For SQLite, we close and use the file path directly.
+	if format == FormatSQLite {
+		f.Close()
+	}
+
+	h.mu.Lock()
+	job.Phase = "parsing"
+	job.UpdatedAt = time.Now()
+	h.mu.Unlock()
+
+	// Get the importer.
+	imp, err := h.importer.Get()
+	if err != nil {
+		if format != FormatSQLite {
+			f.Close()
+		}
+		h.setJobFailed(job, "importer unavailable")
+		return
+	}
+
 	filterActive := len(catFilter) > 0
 
-	sourceKey := "import-" + sourceName
-	ai := imp.New(c.Request.Context(), importer.Info{
-		ID: fmt.Sprintf("import-%s-%d", sourceName, time.Now().Unix()),
+	ai := imp.New(context.Background(), importer.Info{
+		ID: job.ID,
 	})
 
-	cr := &countingReader{r: file, limit: h.config.MaxUploadBytes}
-	format, combined := DetectFormatFromReader(cr)
-
-	var imported, skipped int
-	var importErr error
+	var imported, skipped int64
+	var importErr atomic.Value // stores error
 
 	callback := func(item ParsedItem) {
-		if importErr != nil {
+		if v := importErr.Load(); v != nil {
 			return
 		}
 
@@ -176,20 +296,20 @@ func (h *handler) handleExecute(c *gin.Context) {
 				catKey = string(item.ContentType.ContentType)
 			}
 			if !catFilter[catKey] {
-				skipped++
+				atomic.AddInt64(&skipped, 1)
 				return
 			}
 		}
 
 		id, parseIDErr := protocol.ParseID(item.InfoHash)
 		if parseIDErr != nil {
-			skipped++
+			atomic.AddInt64(&skipped, 1)
 			return
 		}
 
 		importItem := importer.Item{
-			Source:      sourceKey,
-			SourceName:  sourceName,
+			Source:      job.Source,
+			SourceName:  job.SourceName,
 			InfoHash:    id,
 			Name:        item.Name,
 			Size:        item.Size,
@@ -199,27 +319,30 @@ func (h *handler) handleExecute(c *gin.Context) {
 
 		if err := ai.Import(importItem); err != nil {
 			h.logger.Warnw("dbimport: import error", "hash", item.InfoHash, "error", err)
-			importErr = err
+			importErr.Store(err)
 			return
 		}
-		imported++
+
+		newImported := atomic.AddInt64(&imported, 1)
+
+		// Update job status periodically (every 1000 rows).
+		if newImported%1000 == 0 {
+			h.mu.Lock()
+			job.Phase = "importing"
+			job.Imported = newImported
+			job.Skipped = atomic.LoadInt64(&skipped)
+			job.UpdatedAt = time.Now()
+			h.mu.Unlock()
+		}
 	}
+
+	h.mu.Lock()
+	job.Phase = "importing"
+	job.UpdatedAt = time.Now()
+	h.mu.Unlock()
 
 	var parseErr error
 	if format == FormatSQLite {
-		// SQLite needs random access; save to temp file.
-		tmpPath, saveErr := SaveToTemp(combined, h.config.MaxUploadBytes)
-		if saveErr != nil {
-			ai.Drain()
-			ai.Close()
-			if strings.Contains(saveErr.Error(), "exceeds maximum size") {
-				c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": saveErr.Error()})
-			} else {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save file"})
-			}
-			return
-		}
-		defer os.Remove(tmpPath)
 		parseErr = ParseSQLiteStream(tmpPath, callback)
 	} else {
 		switch format {
@@ -230,24 +353,28 @@ func (h *handler) handleExecute(c *gin.Context) {
 		default:
 			parseErr = ParseCSVStream(combined, callback)
 		}
+		f.Close()
 	}
+
 	if parseErr != nil {
 		h.logger.Warnw("dbimport: parse error", "format", format, "error", parseErr)
 	}
 
-	if cr.exceeded {
+	// Check if import had an error.
+	if v := importErr.Load(); v != nil {
 		ai.Drain()
 		ai.Close()
-		c.JSON(http.StatusRequestEntityTooLarge, gin.H{
-			"error": fmt.Sprintf("file exceeds maximum size of %d bytes", h.config.MaxUploadBytes),
-		})
+		h.setJobFailed(job, fmt.Sprintf("import error: %v", v))
 		return
 	}
 
-	if imported == 0 {
+	finalImported := atomic.LoadInt64(&imported)
+	finalSkipped := atomic.LoadInt64(&skipped)
+
+	if finalImported == 0 {
 		ai.Drain()
 		ai.Close()
-		c.JSON(http.StatusBadRequest, gin.H{"error": "no valid torrents found in file"})
+		h.setJobFailed(job, "no valid torrents found in file")
 		return
 	}
 
@@ -256,17 +383,53 @@ func (h *handler) handleExecute(c *gin.Context) {
 		h.logger.Warnw("dbimport: close error", "error", closeErr)
 	}
 
+	h.mu.Lock()
+	job.Phase = "complete"
+	job.Imported = finalImported
+	job.Skipped = finalSkipped
+	job.UpdatedAt = time.Now()
+	h.mu.Unlock()
+
 	h.logger.Infow("dbimport: import complete",
-		"source", sourceKey,
-		"imported", imported,
-		"skipped", skipped,
+		"source", job.Source,
+		"job_id", job.ID,
+		"imported", finalImported,
+		"skipped", finalSkipped,
+		"duration", time.Since(job.StartedAt).String(),
 	)
+}
+
+func (h *handler) setJobFailed(job *importJob, errMsg string) {
+	h.mu.Lock()
+	job.Phase = "failed"
+	job.Error = errMsg
+	job.UpdatedAt = time.Now()
+	h.mu.Unlock()
+	h.logger.Errorw("dbimport: import failed",
+		"source", job.Source,
+		"job_id", job.ID,
+		"error", errMsg,
+	)
+}
+
+// handleStatus returns the current import job status. Used for polling.
+func (h *handler) handleStatus(c *gin.Context) {
+	h.mu.Lock()
+	job := h.currentJob
+	h.mu.Unlock()
+
+	if job == nil {
+		c.JSON(http.StatusOK, gin.H{"active": false})
+		return
+	}
+
+	h.mu.Lock()
+	snapshot := *job
+	h.mu.Unlock()
 
 	c.JSON(http.StatusOK, gin.H{
-		"status":   "complete",
-		"source":   sourceKey,
-		"imported": imported,
-		"skipped":  skipped,
+		"active": snapshot.Phase == "uploading" || snapshot.Phase == "parsing" || snapshot.Phase == "importing",
+		"job":    snapshot,
 	})
 }
 
