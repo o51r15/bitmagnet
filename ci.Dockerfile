@@ -22,6 +22,10 @@ RUN go mod download
 
 COPY . ./
 
+# Ensure all transitive deps are cached (go mod download only fetches
+# modules already in go.sum; tidy resolves any new indirect imports).
+RUN go mod tidy
+
 # Replace any committed webui/dist with the freshly built frontend
 RUN rm -rf webui/dist
 COPY --from=webui-builder /webui/dist ./webui/dist
