@@ -54,6 +54,38 @@
       </mat-card>
     }
 
+    <!-- Bootstrap Resources -->
+    @if (phase() === 'upload') {
+      <mat-card class="resources-card">
+        <mat-card-header>
+          <mat-icon mat-card-avatar>dataset_linked</mat-icon>
+          <mat-card-title>Bootstrap Resources</mat-card-title>
+          <mat-card-subtitle>
+            Kickstart your index with community database dumps
+          </mat-card-subtitle>
+        </mat-card-header>
+        <mat-card-content>
+          <div class="resource-list">
+            <a
+              class="resource-item"
+              href="https://tnt.maiti.info/dhtd/"
+              target="_blank"
+              rel="noopener"
+            >
+              <mat-icon>storage</mat-icon>
+              <div class="resource-info">
+                <span class="resource-name">Magnetico DHT Dumps</span>
+                <span class="resource-desc">
+                  30M+ torrents from DHT crawling — updated regularly. Download the SQLite database and import it here.
+                </span>
+              </div>
+              <mat-icon class="resource-link-icon">open_in_new</mat-icon>
+            </a>
+          </div>
+        </mat-card-content>
+      </mat-card>
+    }
+
     <!-- Phase: Configure -->
     @if (phase() === 'configure') {
       <mat-card class="config-card">

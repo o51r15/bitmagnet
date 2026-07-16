@@ -24,6 +24,54 @@
   }
 }
 
+.resources-card {
+  margin-bottom: 16px;
+
+  .resource-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .resource-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px;
+    border-radius: 8px;
+    text-decoration: none;
+    color: inherit;
+    transition: background-color 0.15s;
+
+    &:hover {
+      background-color: var(--mdc-theme-text-hint-on-background, rgba(0, 0, 0, 0.04));
+    }
+  }
+
+  .resource-info {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .resource-name {
+    font-weight: 500;
+  }
+
+  .resource-desc {
+    font-size: 0.85em;
+    color: var(--mdc-theme-text-secondary-on-background, #666);
+  }
+
+  .resource-link-icon {
+    color: var(--mdc-theme-text-secondary-on-background, #666);
+    font-size: 18px;
+    width: 18px;
+    height: 18px;
+  }
+}
+
 .config-card {
   margin-bottom: 16px;
 
