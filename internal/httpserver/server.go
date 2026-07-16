@@ -59,7 +59,7 @@ func New(p Params) Result {
 					go (func() {
 						serveErr := s.Serve(ln)
 						if !errors.Is(serveErr, http.ErrServerClosed) {
-							panic(serveErr)
+							p.Logger.Fatal("http server terminated unexpectedly", zap.Error(serveErr))
 						}
 					})()
 					return nil
