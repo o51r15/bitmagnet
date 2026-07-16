@@ -100,6 +100,14 @@ workflows:
                 condition: "flags.apis_enabled && flags.tmdb_enabled"
                 if_action: attach_tmdb_content_by_search
                 else_action: unmatched
+            # try TPDB for unmatched XXX content:
+            - if_else:
+                condition:
+                  and:
+                    - "!result.hasAttachedContent"
+                    - "result.contentType == contentType.xxx"
+                    - "flags.apis_enabled && flags.tpdb_enabled"
+                if_action: attach_tpdb_content
     # if content is attached and has an IMDB ID, enrich with OMDb metadata:
     - if_else:
         condition:
@@ -277,6 +285,7 @@ flag_definitions:
   apis_enabled: bool
   tmdb_enabled: bool
   omdb_enabled: bool
+  tpdb_enabled: bool
   delete_content_types: content_type_list
   delete_xxx: bool
 flags:
@@ -284,5 +293,6 @@ flags:
   apis_enabled: true
   tmdb_enabled: true
   omdb_enabled: true
+  tpdb_enabled: true
   delete_content_types: []
   delete_xxx: false
