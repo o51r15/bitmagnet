@@ -82,8 +82,8 @@ func New(params Params) Result {
 						banningChecker:               params.BanningChecker,
 						bootstrapNodes:               params.Config.BootstrapNodes,
 						// Wire from config — was hardcoded to 10 minutes, ignoring the
-					// ReseedBootstrapNodesInterval config field entirely. (M0.4)
-					reseedBootstrapNodesInterval: params.Config.ReseedBootstrapNodesInterval,
+						// ReseedBootstrapNodesInterval config field entirely. (M0.4)
+						reseedBootstrapNodesInterval: params.Config.ReseedBootstrapNodesInterval,
 						getOldestNodesInterval:       time.Second * 10,
 						oldPeerThreshold:             time.Minute * 15,
 						discoveredNodes:              params.DiscoveredNodes,
