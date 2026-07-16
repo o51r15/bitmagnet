@@ -156,6 +156,12 @@ type serverHandler struct {
 
 func (h *serverHandler) start(ctx context.Context) {
 	checkTicker := time.NewTicker(1)
+	defer checkTicker.Stop()
+
+	// reschedule lets the worker goroutine ask the main loop to poll again
+	// immediately after a job is found. All checkTicker.Reset calls happen in
+	// this goroutine so the ticker is never mutated concurrently.
+	reschedule := make(chan struct{}, 1)
 
 	for {
 		select {
@@ -170,6 +176,8 @@ func (h *serverHandler) start(ctx context.Context) {
 				defer h.sem.Release(1)
 				_, _, _ = h.handleJob(ctx, h.query.QueueJob.ID.Eq(notification.Payload))
 			}()
+		case <-reschedule:
+			checkTicker.Reset(1)
 		case <-checkTicker.C:
 			if semErr := h.sem.Acquire(ctx, 1); semErr != nil {
 				return
@@ -180,10 +188,13 @@ func (h *serverHandler) start(ctx context.Context) {
 			go func() {
 				defer h.sem.Release(1)
 				jobID, _, err := h.handleJob(ctx)
-				// if a job was found, we should check straight away for another job,
-				// otherwise we wait for the check interval
+				// if a job was found, ask the main loop to check straight away for
+				// another job, otherwise we wait for the check interval
 				if err == nil && jobID != "" {
-					checkTicker.Reset(1)
+					select {
+					case reschedule <- struct{}{}:
+					default:
+					}
 				}
 			}()
 		}
