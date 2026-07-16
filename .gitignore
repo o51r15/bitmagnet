@@ -47,3 +47,6 @@ DEVLOG.md
 HANDOFF.md
 
 WIKI_NOTES.md
+
+# Contains live VPN/qBittorrent secrets — never commit
+gluetun-compose.yml
