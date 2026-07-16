@@ -9,6 +9,7 @@ import { HttpClient } from "@angular/common/http";
 import { Apollo, gql } from "apollo-angular";
 import { AppModule } from "../app.module";
 import { DocumentTitleComponent } from "../layout/document-title.component";
+import { ErrorsService } from "../errors/errors.service";
 
 interface ProwlarrSource {
   key: string;
@@ -54,6 +55,7 @@ const PROWLARR_SOURCES_QUERY = gql`
 export class ProwlarrComponent implements OnInit {
   private apollo = inject(Apollo);
   private http = inject(HttpClient);
+  private errors = inject(ErrorsService);
 
   sources = signal<ProwlarrSource[]>([]);
   loading = signal(true);
@@ -129,12 +131,14 @@ export class ProwlarrComponent implements OnInit {
             next.delete(sourceKey);
             return next;
           }),
-        error: () =>
+        error: () => {
+          this.errors.addError("Prowlarr crawl request failed");
           this.crawling.update((s) => {
             const next = new Set(s);
             next.delete(sourceKey);
             return next;
-          }),
+          });
+        },
       });
   }
 }
