@@ -11,7 +11,7 @@ COPY . /build
 
 WORKDIR /build
 
-RUN go mod tidy
+RUN go mod download
 RUN go build -ldflags "-s -w -X github.com/bitmagnet-io/bitmagnet/internal/version.GitTag=$(git describe --tags --always --dirty)"
 
 FROM alpine:3.20
