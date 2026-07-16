@@ -121,7 +121,7 @@ func discoverSchema(db *sql.DB) (*sqliteDiscovery, error) {
 // tryDiscoverTPBSchema checks for TPB-style schema: a torrent BLOB table
 // (with id + file BLOB) and a metadata table (with title, size, date, etc.).
 func tryDiscoverTPBSchema(db *sql.DB, tables []string) *sqliteDiscovery {
-	var blobTable, metaTable, catTable string
+	var blobTable, catTable string
 
 	for _, table := range tables {
 		cols := getColumnInfo(db, table)
