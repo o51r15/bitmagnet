@@ -61,7 +61,7 @@ type SearchResult struct {
 	Categories  []Category `json:"categories"`
 }
 
-func (c *prowlarrClient) get(path string, params url.Values) ([]byte, error) {
+func (c *prowlarrClient) get(ctx context.Context, path string, params url.Values) ([]byte, error) {
 	if params == nil {
 		params = url.Values{}
 	}
@@ -70,7 +70,7 @@ func (c *prowlarrClient) get(path string, params url.Values) ([]byte, error) {
 	if encoded != "" {
 		u += "?" + encoded
 	}
-	req, err := http.NewRequest(http.MethodGet, u, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -90,8 +90,8 @@ func (c *prowlarrClient) get(path string, params url.Values) ([]byte, error) {
 	return io.ReadAll(io.LimitReader(resp.Body, maxBodyBytes))
 }
 
-func (c *prowlarrClient) getIndexers() ([]Indexer, error) {
-	body, err := c.get("indexer", nil)
+func (c *prowlarrClient) getIndexers(ctx context.Context) ([]Indexer, error) {
+	body, err := c.get(ctx, "indexer", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -99,7 +99,7 @@ func (c *prowlarrClient) getIndexers() ([]Indexer, error) {
 	return indexers, json.Unmarshal(body, &indexers)
 }
 
-func (c *prowlarrClient) search(indexerID int, categories []int) ([]SearchResult, error) {
+func (c *prowlarrClient) search(ctx context.Context, indexerID int, categories []int) ([]SearchResult, error) {
 	params := url.Values{}
 	// Prowlarr requires plain "indexerIds" and "categories" — bracket form
 	// (indexerIds[]) gets percent-encoded by url.Values and is silently ignored,
@@ -110,7 +110,7 @@ func (c *prowlarrClient) search(indexerID int, categories []int) ([]SearchResult
 	for _, cat := range categories {
 		params.Add("categories", strconv.Itoa(cat))
 	}
-	body, err := c.get("search", params)
+	body, err := c.get(ctx, "search", params)
 	if err != nil {
 		return nil, err
 	}

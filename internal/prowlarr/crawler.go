@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/bitmagnet-io/bitmagnet/internal/importer"
@@ -43,6 +44,11 @@ type crawler struct {
 	triggerChan   chan int
 	stopped       chan struct{}
 	knownIndexers map[int]indexerMeta // populated on start, used by trigger handler
+
+	// inflight guards against overlapping crawls of the same indexer (a
+	// scheduled tick and an on-demand trigger racing). Access under inflightMu.
+	inflightMu sync.Mutex
+	inflight   map[int]bool
 }
 
 func (c *crawler) start(ctx context.Context) {
@@ -54,7 +60,7 @@ func (c *crawler) start(ctx context.Context) {
 	var indexers []Indexer
 	for {
 		var err error
-		indexers, err = c.client.getIndexers()
+		indexers, err = c.client.getIndexers(ctx)
 		if err == nil {
 			break
 		}
@@ -91,7 +97,7 @@ func (c *crawler) start(ctx context.Context) {
 	// WARN is logged so users can update their config. (Confirmed broken in
 	// Session 10: Torrenting id:70, LimeTorrents id:15.)
 	for id, meta := range c.knownIndexers {
-		results, probeErr := c.client.search(id, meta.categories)
+		results, probeErr := c.client.search(ctx, id, meta.categories)
 		if probeErr != nil {
 			c.logger.Warnw("prowlarr: indexer probe failed, will still attempt crawls",
 				"indexer_id", id, "name", meta.name, "error", probeErr)
@@ -155,12 +161,28 @@ func (c *crawler) runIndexerLoop(ctx context.Context, indexerID int, indexerName
 }
 
 func (c *crawler) crawlIndexer(ctx context.Context, indexerID int, indexerName string, categories []int) {
+	// Skip if a crawl for this indexer is already running (a scheduled tick and
+	// an on-demand trigger can otherwise overlap and double-import / race writes).
+	c.inflightMu.Lock()
+	if c.inflight[indexerID] {
+		c.inflightMu.Unlock()
+		c.logger.Debugw("prowlarr: crawl already in progress, skipping", "indexer_id", indexerID)
+		return
+	}
+	c.inflight[indexerID] = true
+	c.inflightMu.Unlock()
+	defer func() {
+		c.inflightMu.Lock()
+		delete(c.inflight, indexerID)
+		c.inflightMu.Unlock()
+	}()
+
 	c.logger.Infow("prowlarr: crawling indexer", "indexer_id", indexerID)
 
 	// Load high-water mark for this indexer
 	lastSeen := c.loadLastSeen(indexerID)
 
-	results, err := c.client.search(indexerID, categories)
+	results, err := c.client.search(ctx, indexerID, categories)
 	if err != nil {
 		c.logger.Warnw("prowlarr: search failed", "indexer_id", indexerID, "error", err)
 		return
@@ -191,10 +213,13 @@ func (c *crawler) crawlIndexer(ctx context.Context, indexerID int, indexerName s
 		}
 	}
 
-	// Filter to only results newer than last seen
+	// Filter to results at or after the last-seen high-water mark. Using >=
+	// (rather than strict >) means items sharing the exact boundary timestamp
+	// are not permanently skipped; imports are idempotent so the small amount
+	// of boundary re-processing is harmless.
 	var newResults []SearchResult
 	for _, r := range results {
-		if r.PublishDate.After(lastSeen) {
+		if !r.PublishDate.Before(lastSeen) {
 			newResults = append(newResults, r)
 		}
 	}
@@ -252,9 +277,8 @@ func (c *crawler) crawlIndexer(ctx context.Context, indexerID int, indexerName s
 	// buffered, but the final partial batch (< 100 items) isn't flushed to DB
 	// until Close() calls flushLocked(). Running updates before Close() means
 	// the source rows don't exist yet and the UPDATE matches 0 rows.
-	for _, su := range seedUpdates {
-		c.updateSeedCounts(source, su.id, su.seeders, su.leechers)
-	}
+	// Batched into a single transaction to avoid one commit per hash (N+1).
+	c.applySeedCounts(source, seedUpdates)
 	// Refresh stale seed counts for existing torrents discovered in this crawl
 	if len(staleRefreshUpdates) > 0 {
 		refreshed := c.refreshStaleSeedCounts(source, staleRefreshUpdates)
@@ -270,23 +294,30 @@ func (c *crawler) crawlIndexer(ctx context.Context, indexerID int, indexerName s
 		"indexer_id", indexerID, "imported", imported, "new_results", len(results), "last_seen", maxDate)
 }
 
-// updateSeedCounts writes the indexer-reported seeders/leechers onto the
-// Prowlarr source row in torrents_torrent_sources.
-func (c *crawler) updateSeedCounts(source string, infoHash protocol.ID, seeders, leechers int) {
+// applySeedCounts writes the indexer-reported seeders/leechers onto the
+// Prowlarr source rows in torrents_torrent_sources. All updates run inside a
+// single transaction so the crawl pays one commit instead of one per hash.
+func (c *crawler) applySeedCounts(source string, updates []seedUpdate) {
+	if len(updates) == 0 {
+		return
+	}
 	d, err := c.db.Get()
 	if err != nil {
 		return
 	}
-	result := d.Exec(
-		`UPDATE torrents_torrent_sources SET seeders = ?, leechers = ? WHERE info_hash = ? AND source = ?`,
-		seeders, leechers, infoHash, source,
-	)
-	if result.Error != nil {
-		c.logger.Debugw("prowlarr: failed to update seed counts",
-			"info_hash", infoHash.String(), "error", result.Error)
-	} else if result.RowsAffected == 0 {
-		c.logger.Debugw("prowlarr: seed count update matched 0 rows (source row may not exist yet)",
-			"info_hash", infoHash.String(), "source", source)
+	txErr := d.Transaction(func(tx *gorm.DB) error {
+		for _, su := range updates {
+			if err := tx.Exec(
+				`UPDATE torrents_torrent_sources SET seeders = ?, leechers = ? WHERE info_hash = ? AND source = ?`,
+				su.seeders, su.leechers, su.id, source,
+			).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if txErr != nil {
+		c.logger.Debugw("prowlarr: failed to apply seed counts", "source", source, "error", txErr)
 	}
 }
 
@@ -299,16 +330,26 @@ func (c *crawler) refreshStaleSeedCounts(source string, updates []seedUpdate) in
 	}
 	cutoff := time.Now().AddDate(0, 0, -c.config.SeedRefreshMaxAgeDays)
 	refreshed := 0
-	for _, su := range updates {
-		result := d.Exec(
-			`UPDATE torrents_torrent_sources
-			 SET seeders = ?, leechers = ?, updated_at = NOW()
-			 WHERE info_hash = ? AND source = ? AND updated_at < ?`,
-			su.seeders, su.leechers, su.id, source, cutoff,
-		)
-		if result.Error == nil && result.RowsAffected > 0 {
-			refreshed++
+	txErr := d.Transaction(func(tx *gorm.DB) error {
+		for _, su := range updates {
+			result := tx.Exec(
+				`UPDATE torrents_torrent_sources
+				 SET seeders = ?, leechers = ?, updated_at = NOW()
+				 WHERE info_hash = ? AND source = ? AND updated_at < ?`,
+				su.seeders, su.leechers, su.id, source, cutoff,
+			)
+			if result.Error != nil {
+				return result.Error
+			}
+			if result.RowsAffected > 0 {
+				refreshed++
+			}
 		}
+		return nil
+	})
+	if txErr != nil {
+		c.logger.Debugw("prowlarr: failed to refresh stale seed counts", "source", source, "error", txErr)
+		return 0
 	}
 	return refreshed
 }

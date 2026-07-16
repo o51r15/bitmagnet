@@ -40,6 +40,9 @@ func (b builder) Apply(e *gin.Engine) error {
 	// Returns 202 Accepted immediately; the crawl runs asynchronously.
 	// If the prowlarr crawler is not configured (no API key) the call is a no-op.
 	e.POST("/api/prowlarr/crawl", func(c *gin.Context) {
+		// Cap the request body -- this is a tiny JSON payload; anything larger
+		// is malformed or hostile.
+		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 64*1024)
 		var req crawlRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
@@ -48,6 +51,17 @@ func (b builder) Apply(e *gin.Engine) error {
 		if len(req.IndexerIDs) == 0 {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "indexerIds must not be empty"})
 			return
+		}
+		const maxIndexers = 100
+		if len(req.IndexerIDs) > maxIndexers {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "too many indexerIds"})
+			return
+		}
+		for _, id := range req.IndexerIDs {
+			if id <= 0 {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "indexerIds must be positive integers"})
+				return
+			}
 		}
 		for _, id := range req.IndexerIDs {
 			b.crawlNow(id)

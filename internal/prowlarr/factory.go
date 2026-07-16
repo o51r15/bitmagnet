@@ -34,6 +34,7 @@ func New(p Params) Result {
 		logger:       p.Logger.Named("prowlarr"),
 		triggerChan:  make(chan int, 10),
 		stopped:      make(chan struct{}),
+		inflight:     make(map[int]bool),
 	}
 
 	return Result{
