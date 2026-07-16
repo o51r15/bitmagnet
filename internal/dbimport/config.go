@@ -2,7 +2,8 @@ package dbimport
 
 // Config holds settings for the database import feature.
 type Config struct {
-	// MaxUploadBytes limits the size of uploaded files. Default 500 MB.
+	// MaxUploadBytes limits the size of uploaded files. Default 25 GB.
+	// Set to 0 to disable the limit.
 	MaxUploadBytes int64 `yaml:"max_upload_bytes"`
 	// ClassifyDelaySeconds is the delay applied to classification queue
 	// jobs created during import. This throttles TMDB/OMDb API usage so
@@ -16,7 +17,7 @@ type Config struct {
 // NewDefaultConfig returns safe defaults for the import feature.
 func NewDefaultConfig() Config {
 	return Config{
-		MaxUploadBytes:       500 * 1024 * 1024, // 500 MB
+		MaxUploadBytes:       25 * 1024 * 1024 * 1024, // 25 GB
 		ClassifyDelaySeconds: 30,
 		ClassifyBatchSize:    50,
 	}

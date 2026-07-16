@@ -2,7 +2,9 @@ package dbimport
 
 import (
 	"bufio"
+	"encoding/base64"
 	"encoding/csv"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -135,13 +137,67 @@ func parseContentType(s string) model.NullContentType {
 	return model.NullContentType{}
 }
 
+// tryDecodeHashField attempts to interpret a field as an info hash.
+// Supports 40-char hex hashes and base64-encoded 20-byte SHA1 hashes.
+// Returns the lowercase hex hash or empty string.
+func tryDecodeHashField(s string) string {
+	s = strings.TrimSpace(s)
+	if validInfoHash(s) {
+		return strings.ToLower(s)
+	}
+	// Try base64 decode (20 bytes = 28 chars base64 with padding, or 27 without).
+	if len(s) >= 27 && len(s) <= 28 {
+		if b, err := base64.StdEncoding.DecodeString(s); err == nil && len(b) == 20 {
+			return hex.EncodeToString(b)
+		}
+		// Try URL-safe or raw base64 variants.
+		if b, err := base64.RawStdEncoding.DecodeString(s); err == nil && len(b) == 20 {
+			return hex.EncodeToString(b)
+		}
+	}
+	return ""
+}
+
+// detectCSVDelimiter guesses the delimiter from a header line.
+func detectCSVDelimiter(header string) rune {
+	// Count candidate delimiters in the header.
+	for _, d := range []rune{'\t', ';', '|'} {
+		if strings.ContainsRune(header, d) {
+			return d
+		}
+	}
+	return ','
+}
+
 // ParseCSVStream reads a CSV file, calling fn for each valid item.
 // Streams line-by-line without accumulating all items in memory.
+// Auto-detects delimiter (comma, semicolon, tab, pipe) and supports
+// both hex and base64-encoded info hashes.
 func ParseCSVStream(r io.Reader, fn func(ParsedItem)) error {
-	cr := csv.NewReader(r)
+	// Buffer the reader so we can peek the first line for delimiter detection.
+	br := bufio.NewReader(r)
+	firstLine, err := br.ReadString('\n')
+	if err != nil && err != io.EOF {
+		return fmt.Errorf("reading CSV first line: %w", err)
+	}
+	// Strip comment prefix (some dumps use # as header marker).
+	headerLine := strings.TrimSpace(firstLine)
+	if strings.HasPrefix(headerLine, "#") {
+		headerLine = strings.TrimSpace(headerLine[1:])
+	}
+
+	delimiter := detectCSVDelimiter(headerLine)
+
+	// Re-create the CSV reader with the peeked line + remainder.
+	// We need to feed the cleaned header (without #) back.
+	cleanedFirst := headerLine + "\n"
+	combined := io.MultiReader(strings.NewReader(cleanedFirst), br)
+
+	cr := csv.NewReader(combined)
+	cr.Comma = delimiter
 	cr.LazyQuotes = true
 	cr.TrimLeadingSpace = true
-	cr.ReuseRecord = false // need stable records for callback
+	cr.ReuseRecord = false
 
 	header, err := cr.Read()
 	if err != nil {
@@ -150,10 +206,16 @@ func ParseCSVStream(r io.Reader, fn func(ParsedItem)) error {
 
 	colIdx := make(map[string]int)
 	for i, h := range header {
-		colIdx[strings.ToLower(strings.TrimSpace(h))] = i
+		// Normalize: lowercase, strip parens/suffixes like "HASH(B64)" → "hash"
+		norm := strings.ToLower(strings.TrimSpace(h))
+		if paren := strings.IndexByte(norm, '('); paren >= 0 {
+			norm = strings.TrimSpace(norm[:paren])
+		}
+		colIdx[norm] = i
 	}
 
 	hashCol := -1
+	hashIsBase64 := false
 	for _, candidate := range []string{"info_hash", "infohash", "hash", "btih"} {
 		if idx, ok := colIdx[candidate]; ok {
 			hashCol = idx
@@ -169,8 +231,14 @@ func ParseCSVStream(r io.Reader, fn func(ParsedItem)) error {
 			return fmt.Errorf("CSV has no recognizable info_hash column and no data rows")
 		}
 		for i, val := range peek {
-			if validInfoHash(strings.TrimSpace(val)) {
+			v := strings.TrimSpace(val)
+			if validInfoHash(v) {
 				hashCol = i
+				break
+			}
+			if tryDecodeHashField(v) != "" {
+				hashCol = i
+				hashIsBase64 = true
 				break
 			}
 		}
@@ -189,7 +257,7 @@ func ParseCSVStream(r io.Reader, fn func(ParsedItem)) error {
 		return -1
 	}
 	nameCol := findCol("name", "title", "torrent_name")
-	sizeCol := findCol("size", "length", "total_size")
+	sizeCol := findCol("size", "length", "total_size", "size(bytes)")
 	catCol := findCol("category", "content_type", "type", "cat")
 	seedCol := findCol("seeders", "seeds", "seed")
 	leechCol := findCol("leechers", "leech", "peers")
@@ -203,8 +271,18 @@ func ParseCSVStream(r io.Reader, fn func(ParsedItem)) error {
 	}
 
 	parseRow := func(record []string) (ParsedItem, bool) {
-		hash := strings.ToLower(getField(record, hashCol))
-		if !validInfoHash(hash) {
+		rawHash := getField(record, hashCol)
+		var hash string
+		if hashIsBase64 {
+			hash = tryDecodeHashField(rawHash)
+		} else {
+			hash = strings.ToLower(rawHash)
+			if !validInfoHash(hash) {
+				// Fallback: try base64 in case it's mixed.
+				hash = tryDecodeHashField(rawHash)
+			}
+		}
+		if hash == "" {
 			return ParsedItem{}, false
 		}
 		item := ParsedItem{InfoHash: hash}
@@ -230,16 +308,7 @@ func ParseCSVStream(r io.Reader, fn func(ParsedItem)) error {
 			}
 		}
 		if v := getField(record, dateCol); v != "" {
-			for _, layout := range []string{
-				time.RFC3339,
-				"2006-01-02 15:04:05",
-				"2006-01-02",
-			} {
-				if t, err := time.Parse(layout, v); err == nil {
-					item.PublishedAt = t
-					break
-				}
-			}
+			item.PublishedAt = parseDateFlexible(v)
 		}
 		return item, true
 	}
@@ -263,6 +332,23 @@ func ParseCSVStream(r io.Reader, fn func(ParsedItem)) error {
 		}
 	}
 	return nil
+}
+
+// parseDateFlexible tries multiple date formats including natural language dates.
+func parseDateFlexible(s string) time.Time {
+	s = strings.TrimSpace(s)
+	for _, layout := range []string{
+		time.RFC3339,
+		"2006-01-02 15:04:05",
+		"2006-01-02",
+		"2006-Jan-02 15:04:05",       // 2015-Oct-27 04:10:22
+		"02 Jan 2006 15:04:05",       // common log format
+	} {
+		if t, err := time.Parse(layout, s); err == nil {
+			return t
+		}
+	}
+	return time.Time{}
 }
 
 // ParseCSV reads a CSV file into a slice (convenience wrapper).
@@ -334,29 +420,25 @@ func ParseNDJSON(r io.Reader) ([]ParsedItem, error) {
 	return items, err
 }
 
-// sqlInsertRe matches INSERT INTO ... VALUES lines and extracts the values portion.
-var sqlInsertRe = regexp.MustCompile(`(?i)INSERT\s+INTO\s+\S+\s*(?:\([^)]*\))?\s*VALUES\s*(.+);?\s*$`)
-
-// sqlValueRe extracts individual value tuples from an INSERT VALUES clause.
-var sqlValueRe = regexp.MustCompile(`\(([^)]+)\)`)
+// sqlInsertRe matches INSERT INTO ... VALUES lines.
+var sqlInsertRe = regexp.MustCompile(`(?i)INSERT\s+INTO\s+\S+\s*(?:\([^)]*\))?\s*VALUES\s*`)
 
 // ParseSQLStream extracts torrent data from SQL INSERT statements, calling fn for each.
+// Handles quoted strings containing commas and parentheses correctly.
 func ParseSQLStream(r io.Reader, fn func(ParsedItem)) error {
 	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, 0, 64*1024), 10*1024*1024) // 10 MB lines for big INSERTs
 
 	for scanner.Scan() {
 		line := scanner.Text()
-		match := sqlInsertRe.FindStringSubmatch(line)
-		if match == nil {
+		loc := sqlInsertRe.FindStringIndex(line)
+		if loc == nil {
 			continue
 		}
-		tuples := sqlValueRe.FindAllStringSubmatch(match[1], -1)
-		for _, tuple := range tuples {
-			if len(tuple) < 2 {
-				continue
-			}
-			fields := strings.Split(tuple[1], ",")
+		valuesPart := line[loc[1]:]
+		// Extract tuples respecting SQL quoting.
+		tuples := extractSQLTuples(valuesPart)
+		for _, fields := range tuples {
 			item := parseSQLTuple(fields)
 			if item.InfoHash != "" {
 				fn(item)
@@ -364,6 +446,90 @@ func ParseSQLStream(r io.Reader, fn func(ParsedItem)) error {
 		}
 	}
 	return scanner.Err()
+}
+
+// extractSQLTuples parses "(val1, val2, ...),(val1, val2, ...)" respecting
+// single-quoted strings (with '' escapes) so commas and parens inside strings
+// don't break parsing.
+func extractSQLTuples(s string) [][]string {
+	var result [][]string
+	i := 0
+	for i < len(s) {
+		// Find opening paren.
+		for i < len(s) && s[i] != '(' {
+			i++
+		}
+		if i >= len(s) {
+			break
+		}
+		i++ // skip '('
+		fields := extractSQLFields(s, &i)
+		if len(fields) > 0 {
+			result = append(result, fields)
+		}
+	}
+	return result
+}
+
+// extractSQLFields reads comma-separated SQL values starting after '(' until
+// the matching ')'. Advances *pos past the ')'.
+func extractSQLFields(s string, pos *int) []string {
+	var fields []string
+	for *pos < len(s) {
+		// Skip whitespace.
+		for *pos < len(s) && (s[*pos] == ' ' || s[*pos] == '\t' || s[*pos] == '\n' || s[*pos] == '\r') {
+			*pos++
+		}
+		if *pos >= len(s) {
+			break
+		}
+		if s[*pos] == ')' {
+			*pos++
+			break
+		}
+
+		var field string
+		if s[*pos] == '\'' {
+			// Quoted string — read until unescaped closing quote.
+			*pos++ // skip opening quote
+			var sb strings.Builder
+			for *pos < len(s) {
+				if s[*pos] == '\'' {
+					if *pos+1 < len(s) && s[*pos+1] == '\'' {
+						sb.WriteByte('\'')
+						*pos += 2
+						continue
+					}
+					*pos++ // skip closing quote
+					break
+				}
+				// Handle backslash escapes (MySQL style).
+				if s[*pos] == '\\' && *pos+1 < len(s) {
+					sb.WriteByte(s[*pos+1])
+					*pos += 2
+					continue
+				}
+				sb.WriteByte(s[*pos])
+				*pos++
+			}
+			field = sb.String()
+		} else {
+			// Unquoted value (number, NULL, etc.).
+			start := *pos
+			for *pos < len(s) && s[*pos] != ',' && s[*pos] != ')' {
+				*pos++
+			}
+			field = strings.TrimSpace(s[start:*pos])
+		}
+
+		fields = append(fields, field)
+
+		// Skip comma between fields.
+		if *pos < len(s) && s[*pos] == ',' {
+			*pos++
+		}
+	}
+	return fields
 }
 
 // ParseSQL extracts torrent data from SQL INSERT statements (convenience wrapper).
@@ -376,14 +542,24 @@ func ParseSQL(r io.Reader) ([]ParsedItem, error) {
 }
 
 // parseSQLTuple extracts torrent data from a SQL value tuple's fields.
+// Fields have already been unquoted by extractSQLFields.
 func parseSQLTuple(fields []string) ParsedItem {
 	var item ParsedItem
 	for _, f := range fields {
 		f = strings.TrimSpace(f)
-		// Remove SQL string quotes.
-		if len(f) >= 2 && (f[0] == '\'' || f[0] == '"') {
-			f = f[1 : len(f)-1]
+		if strings.EqualFold(f, "null") || f == "" {
+			continue
 		}
+
+		// Check for Postgres bytea hex format: \xbfd30e91...
+		if strings.HasPrefix(f, "\\x") && len(f) == 42 {
+			hexStr := f[2:]
+			if validInfoHash(hexStr) && item.InfoHash == "" {
+				item.InfoHash = strings.ToLower(hexStr)
+				continue
+			}
+		}
+
 		if validInfoHash(f) && item.InfoHash == "" {
 			item.InfoHash = strings.ToLower(f)
 		} else if item.InfoHash != "" && item.Name == "" && len(f) > 2 && !isNumeric(f) {
