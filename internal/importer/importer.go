@@ -259,7 +259,15 @@ func (i *activeImport) persistItems(items ...Item) error {
 			return createTorrentsTorrentSourcesErr
 		}
 
-		return tx.QueueJob.Create(&job)
+		// A job's fingerprint is a hash of its payload (the info-hash set).
+		// The partial unique index queue_jobs_fingerprint_idx forbids a second
+		// pending/retry job with the same fingerprint. When the same hashes are
+		// re-imported while a prior job is still pending (boundary re-imports,
+		// overlapping sources, or repeated startup crawls), a plain Create fails
+		// and rolls back the ENTIRE batch — losing the torrent writes too.
+		// DoNothing turns a duplicate into a skip: the existing pending job will
+		// process those hashes. Mirrors the OnConflict clauses used above.
+		return tx.QueueJob.Clauses(clause.OnConflict{DoNothing: true}).Create(&job)
 	})
 }
 
