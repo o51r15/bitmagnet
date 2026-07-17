@@ -236,7 +236,8 @@
     "queues": "कतारें",
     "torrents": "टोरेंट्स",
     "visualize": "दृश्य करें",
-    "prowlarr": "Prowlarr"
+    "prowlarr": "Prowlarr",
+    "rss_feeds": "RSS Feeds"
   },
   "torrents": {
     "classification": "वर्गीकरण",

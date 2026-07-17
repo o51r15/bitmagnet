@@ -41,6 +41,16 @@
         </a>
         <a
           mat-button
+          routerLink="rss-feeds"
+          #linkRssFeeds="routerLinkActive"
+          routerLinkActive
+          [class]="linkRssFeeds.isActive ? 'active' : ''"
+        >
+          <mat-icon>dynamic_feed</mat-icon>
+          {{ t("routes.rss_feeds") }}
+        </a>
+        <a
+          mat-button
           routerLink="import"
           #linkImport="routerLinkActive"
           routerLinkActive
@@ -75,6 +85,16 @@
         [matTooltip]="t('routes.prowlarr')"
       >
         <mat-icon>rss_feed</mat-icon>
+      </button>
+      <button
+        mat-icon-button
+        routerLink="rss-feeds"
+        #linkRssFeeds="routerLinkActive"
+        routerLinkActive
+        [class]="linkRssFeeds.isActive ? 'active' : ''"
+        [matTooltip]="t('routes.rss_feeds')"
+      >
+        <mat-icon>dynamic_feed</mat-icon>
       </button>
       <button
         mat-icon-button

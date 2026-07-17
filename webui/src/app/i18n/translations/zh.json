@@ -236,7 +236,8 @@
     "queues": "队列",
     "torrents": "种子",
     "visualize": "可视化",
-    "prowlarr": "Prowlarr"
+    "prowlarr": "Prowlarr",
+    "rss_feeds": "RSS Feeds"
   },
   "torrents": {
     "classification": "分类",

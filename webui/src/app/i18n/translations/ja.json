@@ -236,7 +236,8 @@
     "queues": "キュー",
     "torrents": "トレント",
     "visualize": "可視化",
-    "prowlarr": "Prowlarr"
+    "prowlarr": "Prowlarr",
+    "rss_feeds": "RSS Feeds"
   },
   "torrents": {
     "classification": "分類",

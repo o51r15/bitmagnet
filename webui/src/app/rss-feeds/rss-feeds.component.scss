@@ -1,0 +1,64 @@
+.rss-feeds-container {
+  padding: 16px;
+  max-width: 1200px;
+  margin: 0 auto;
+
+  h2 {
+    margin-bottom: 16px;
+  }
+}
+
+.loading-container {
+  display: flex;
+  justify-content: center;
+  padding: 48px;
+}
+
+.sources-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 16px;
+}
+
+.source-card {
+  mat-card-avatar {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+}
+
+.torrent-count {
+  font-size: 1.1em;
+  margin: 8px 0;
+
+  strong {
+    font-size: 1.3em;
+  }
+}
+
+.state-card {
+  max-width: 540px;
+  margin-bottom: 12px;
+
+  mat-card-content {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+
+    mat-icon {
+      margin-top: 2px;
+      flex-shrink: 0;
+    }
+  }
+}
+
+.config-example-card {
+  max-width: 540px;
+
+  pre {
+    margin: 0;
+    font-size: 0.85em;
+    white-space: pre-wrap;
+  }
+}

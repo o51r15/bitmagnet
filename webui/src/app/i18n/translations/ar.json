@@ -236,7 +236,8 @@
     "queues": "الطوابير",
     "torrents": "التورنت",
     "visualize": "تصور",
-    "prowlarr": "Prowlarr"
+    "prowlarr": "Prowlarr",
+    "rss_feeds": "RSS Feeds"
   },
   "torrents": {
     "classification": "التصنيف",

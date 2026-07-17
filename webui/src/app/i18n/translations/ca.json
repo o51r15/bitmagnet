@@ -216,7 +216,8 @@
     "queues": "Cues",
     "torrents": "Torrents",
     "visualize": "Visualitza",
-    "prowlarr": "Prowlarr"
+    "prowlarr": "Prowlarr",
+    "rss_feeds": "RSS Feeds"
   },
   "torrents": {
     "classification": "Classificació",

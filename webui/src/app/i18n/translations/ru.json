@@ -236,7 +236,8 @@
     "queues": "Очереди",
     "torrents": "Торренты",
     "visualize": "Визуализация",
-    "prowlarr": "Prowlarr"
+    "prowlarr": "Prowlarr",
+    "rss_feeds": "RSS Feeds"
   },
   "torrents": {
     "classification": "Классификация",

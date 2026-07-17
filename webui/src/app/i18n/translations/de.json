@@ -236,7 +236,8 @@
     "queues": "Warteschlangen",
     "torrents": "Torrents",
     "visualize": "Visualisieren",
-    "prowlarr": "Prowlarr"
+    "prowlarr": "Prowlarr",
+    "rss_feeds": "RSS Feeds"
   },
   "torrents": {
     "classification": "Klassifizierung",

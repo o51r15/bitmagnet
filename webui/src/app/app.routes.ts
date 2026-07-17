@@ -91,6 +91,13 @@ export const routes: Routes = [
       import("./prowlarr/prowlarr.component").then((c) => c.ProwlarrComponent),
   },
   {
+    path: "rss-feeds",
+    loadComponent: () =>
+      import("./rss-feeds/rss-feeds.component").then(
+        (c) => c.RssFeedsComponent,
+      ),
+  },
+  {
     path: "import",
     loadComponent: () =>
       import("./import/import.component").then((c) => c.ImportComponent),

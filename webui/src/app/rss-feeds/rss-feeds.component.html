@@ -1,0 +1,77 @@
+<ng-container *transloco="let t">
+  <app-document-title [parts]="['RSS Feeds']" />
+  <div class="rss-feeds-container">
+    <h2>RSS Feeds</h2>
+    @if (loading()) {
+      <div class="loading-container">
+        <mat-spinner diameter="40" />
+      </div>
+    } @else if (error()) {
+      <mat-card class="state-card">
+        <mat-card-content>
+          <mat-icon color="warn">error</mat-icon>
+          <span>Failed to load RSS feed sources.</span>
+        </mat-card-content>
+      </mat-card>
+    } @else if (sources().length === 0) {
+      <mat-card class="state-card">
+        <mat-card-content>
+          <mat-icon>info</mat-icon>
+          <span>
+            No RSS feeds found. Add feeds to your bitmagnet
+            <code>config.yml</code> under the <code>rss</code> key. Example:
+          </span>
+        </mat-card-content>
+      </mat-card>
+      <mat-card class="config-example-card">
+        <mat-card-content>
+          <pre>rss:
+  feeds:
+    - name: my-feed
+      url: https://example.com/rss
+      enabled: true
+      interval: 15m</pre>
+        </mat-card-content>
+      </mat-card>
+    } @else {
+      <div class="sources-grid">
+        @for (source of sources(); track source.key) {
+          <mat-card class="source-card">
+            <mat-card-header>
+              <mat-icon mat-card-avatar>rss_feed</mat-icon>
+              <mat-card-title>{{ source.name }}</mat-card-title>
+              <mat-card-subtitle>{{ source.key }}</mat-card-subtitle>
+            </mat-card-header>
+            <mat-card-content>
+              <p class="torrent-count">
+                <strong
+                  >{{ source.count }}{{ source.isEstimate ? "+" : "" }}</strong
+                >
+                torrents
+              </p>
+            </mat-card-content>
+            <mat-card-actions>
+              <a
+                mat-button
+                color="primary"
+                [routerLink]="['/torrents']"
+                [queryParams]="getSearchParams(source.key)"
+              >
+                <mat-icon>search</mat-icon>
+                View Torrents
+              </a>
+              <button
+                mat-button
+                [disabled]="isPolling(source.key)"
+                (click)="pollNow(source.key)"
+              >
+                <mat-icon>refresh</mat-icon>
+                {{ isPolling(source.key) ? "Polling…" : "Poll Now" }}
+              </button>
+            </mat-card-actions>
+          </mat-card>
+        }
+      </div>
+    }
+  </div>
+</ng-container>

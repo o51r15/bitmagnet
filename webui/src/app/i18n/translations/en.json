@@ -234,6 +234,7 @@
     "torrents": "Torrents",
     "visualize": "Visualize",
     "prowlarr": "Prowlarr",
+    "rss_feeds": "RSS Feeds",
     "import": "Import"
   },
   "torrents": {
