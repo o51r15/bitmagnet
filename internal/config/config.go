@@ -205,7 +205,9 @@ func resolveStructNode(
 		Metadata:   nil,
 		Result:     resolvedValue.Interface(),
 		MatchName: func(mapKey, fieldName string) bool {
-			return mapKey == fieldName
+			// Support both PascalCase (top-level resolved fields) and snake_case
+			// (nested struct slice elements from raw YAML maps).
+			return mapKey == fieldName || strcase.ToSnake(mapKey) == strcase.ToSnake(fieldName)
 		},
 	}
 
