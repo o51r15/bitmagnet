@@ -82,7 +82,13 @@ func (r mapResolver) resolveSlice(currentPath []string, sliceV []any, valueType 
 		resolvedValue := reflect.New(valueType.Elem())
 
 		decoder, decoderErr := mapstructure.NewDecoder(&mapstructure.DecoderConfig{
-			Result: resolvedValue.Interface(),
+			// StringToTimeDurationHookFunc lets YAML string values like '15m'
+			// decode into time.Duration fields inside struct slices (e.g.
+			// rssfeed.FeedConfig.Interval, prowlarr.IndexerConfig.Interval).
+			// Without this hook the slice decoder fails with
+			// "expected type 'time.Duration', got unconvertible type 'string'".
+			DecodeHook: mapstructure.StringToTimeDurationHookFunc(),
+			Result:     resolvedValue.Interface(),
 			MatchName: func(mapKey, fieldName string) bool {
 				return mapKey == strcase.ToSnake(fieldName)
 			},
