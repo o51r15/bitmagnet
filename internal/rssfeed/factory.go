@@ -21,8 +21,9 @@ type Params struct {
 
 type Result struct {
 	fx.Out
-	Worker    worker.Worker `group:"workers"`
-	PollNowFn PollNowFunc  `name:"rssfeed_poll_now"`
+	Worker      worker.Worker `group:"workers"`
+	PollNowFn   PollNowFunc   `name:"rssfeed_poll_now"`
+	ListFeedsFn ListFeedsFunc `name:"rssfeed_list_feeds"`
 }
 
 func New(p Params) Result {
@@ -67,5 +68,6 @@ func New(p Params) Result {
 			default:
 			}
 		},
+		ListFeedsFn: pl.listFeeds,
 	}
 }

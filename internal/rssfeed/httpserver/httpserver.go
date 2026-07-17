@@ -11,7 +11,8 @@ import (
 
 type Params struct {
 	fx.In
-	PollNowFn rssfeed.PollNowFunc `name:"rssfeed_poll_now"`
+	PollNowFn   rssfeed.PollNowFunc   `name:"rssfeed_poll_now"`
+	ListFeedsFn rssfeed.ListFeedsFunc `name:"rssfeed_list_feeds"`
 }
 
 type Result struct {
@@ -21,12 +22,13 @@ type Result struct {
 
 func New(p Params) Result {
 	return Result{
-		Option: &builder{pollNow: p.PollNowFn},
+		Option: &builder{pollNow: p.PollNowFn, listFeeds: p.ListFeedsFn},
 	}
 }
 
 type builder struct {
-	pollNow rssfeed.PollNowFunc
+	pollNow   rssfeed.PollNowFunc
+	listFeeds rssfeed.ListFeedsFunc
 }
 
 func (builder) Key() string { return "rssfeed_api" }
@@ -36,6 +38,16 @@ type pollRequest struct {
 }
 
 func (b builder) Apply(e *gin.Engine) error {
+	// GET /api/rss/feeds — returns the configured feeds and their status so the
+	// UI can display them immediately, even before any torrents are imported.
+	e.GET("/api/rss/feeds", func(c *gin.Context) {
+		feeds := b.listFeeds()
+		if feeds == nil {
+			feeds = []rssfeed.FeedStatus{}
+		}
+		c.JSON(http.StatusOK, gin.H{"feeds": feeds})
+	})
+
 	// POST /api/rss/poll — triggers an on-demand poll for the given feed names.
 	// Returns 202 Accepted immediately; the poll runs asynchronously.
 	e.POST("/api/rss/poll", func(c *gin.Context) {

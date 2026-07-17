@@ -10,15 +10,15 @@
       <mat-card class="state-card">
         <mat-card-content>
           <mat-icon color="warn">error</mat-icon>
-          <span>Failed to load RSS feed sources.</span>
+          <span>Failed to load RSS feeds.</span>
         </mat-card-content>
       </mat-card>
-    } @else if (sources().length === 0) {
+    } @else if (feeds().length === 0) {
       <mat-card class="state-card">
         <mat-card-content>
           <mat-icon>info</mat-icon>
           <span>
-            No RSS feeds found. Add feeds to your bitmagnet
+            No RSS feeds configured. Add feeds to your bitmagnet
             <code>config.yml</code> under the <code>rss</code> key. Example:
           </span>
         </mat-card-content>
@@ -27,27 +27,39 @@
         <mat-card-content>
           <pre>rss:
   feeds:
-    - name: my-feed
-      url: https://example.com/rss
+    - name: eztv
+      url: https://eztv.re/ezrss.xml
       enabled: true
       interval: 15m</pre>
         </mat-card-content>
       </mat-card>
     } @else {
       <div class="sources-grid">
-        @for (source of sources(); track source.key) {
+        @for (feed of feeds(); track feed.name) {
           <mat-card class="source-card">
             <mat-card-header>
               <mat-icon mat-card-avatar>rss_feed</mat-icon>
-              <mat-card-title>{{ source.name }}</mat-card-title>
-              <mat-card-subtitle>{{ source.key }}</mat-card-subtitle>
+              <mat-card-title>{{ feed.name }}</mat-card-title>
+              <mat-card-subtitle>
+                @if (feed.enabled) {
+                  <span class="badge badge-on">enabled</span>
+                } @else {
+                  <span class="badge badge-off">disabled</span>
+                }
+                every {{ feed.interval }}
+              </mat-card-subtitle>
             </mat-card-header>
             <mat-card-content>
               <p class="torrent-count">
-                <strong
-                  >{{ source.count }}{{ source.isEstimate ? "+" : "" }}</strong
-                >
+                <strong>{{ feed.count }}{{ feed.isEstimate ? "+" : "" }}</strong>
                 torrents
+              </p>
+              <p class="feed-meta">
+                @if (feed.lastPolled) {
+                  Last new item: {{ feed.lastPolled | date: "medium" }}
+                } @else {
+                  Not polled yet
+                }
               </p>
             </mat-card-content>
             <mat-card-actions>
@@ -55,18 +67,18 @@
                 mat-button
                 color="primary"
                 [routerLink]="['/torrents']"
-                [queryParams]="getSearchParams(source.key)"
+                [queryParams]="getSearchParams(feed.sourceKey)"
               >
                 <mat-icon>search</mat-icon>
                 View Torrents
               </a>
               <button
                 mat-button
-                [disabled]="isPolling(source.key)"
-                (click)="pollNow(source.key)"
+                [disabled]="isPolling(feed.name) || !feed.enabled"
+                (click)="pollNow(feed.name)"
               >
                 <mat-icon>refresh</mat-icon>
-                {{ isPolling(source.key) ? "Polling…" : "Poll Now" }}
+                {{ isPolling(feed.name) ? "Polling…" : "Poll Now" }}
               </button>
             </mat-card-actions>
           </mat-card>

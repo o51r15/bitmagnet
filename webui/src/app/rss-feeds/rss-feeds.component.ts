@@ -11,9 +11,22 @@ import { AppModule } from "../app.module";
 import { DocumentTitleComponent } from "../layout/document-title.component";
 import { ErrorsService } from "../errors/errors.service";
 
-interface RssSource {
-  key: string;
+interface FeedStatus {
   name: string;
+  sourceKey: string;
+  url: string;
+  enabled: boolean;
+  interval: string;
+  lastPolled?: string;
+}
+
+interface RssFeed {
+  name: string;
+  sourceKey: string;
+  url: string;
+  enabled: boolean;
+  interval: string;
+  lastPolled?: string;
   count: number;
   isEstimate: boolean;
 }
@@ -57,48 +70,74 @@ export class RssFeedsComponent implements OnInit {
   private http = inject(HttpClient);
   private errors = inject(ErrorsService);
 
-  sources = signal<RssSource[]>([]);
+  feeds = signal<RssFeed[]>([]);
   loading = signal(true);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   error = signal<any>(null);
   polling = signal<Set<string>>(new Set());
 
   ngOnInit() {
-    this.apollo
-      .query<{
-        torrentContent: {
-          search: {
-            aggregations: {
-              torrentSource?: TorrentSourceAgg[];
+    this.load();
+  }
+
+  private load() {
+    this.loading.set(true);
+    // Fetch configured feeds and torrent-source counts in parallel.
+    this.http.get<{ feeds: FeedStatus[] }>("/api/rss/feeds").subscribe({
+      next: (res) => {
+        const configured = res.feeds ?? [];
+        this.apollo
+          .query<{
+            torrentContent: {
+              search: {
+                aggregations: {
+                  torrentSource?: TorrentSourceAgg[];
+                };
+              };
             };
-          };
-        };
-      }>({
-        query: RSS_SOURCES_QUERY,
-        fetchPolicy: "network-only",
-      })
-      .subscribe({
-        next: (result) => {
-          const all =
-            result.data?.torrentContent?.search?.aggregations?.torrentSource ??
-            [];
-          this.sources.set(
-            all
-              .filter((s) => s.value.startsWith("rss-"))
-              .map((s) => ({
-                key: s.value,
-                name: s.label,
-                count: s.count,
-                isEstimate: s.isEstimate,
-              })),
-          );
-          this.loading.set(false);
-        },
-        error: (err) => {
-          this.error.set(err);
-          this.loading.set(false);
-        },
-      });
+          }>({
+            query: RSS_SOURCES_QUERY,
+            fetchPolicy: "network-only",
+          })
+          .subscribe({
+            next: (result) => {
+              const aggs =
+                result.data?.torrentContent?.search?.aggregations
+                  ?.torrentSource ?? [];
+              const countByKey = new Map(
+                aggs
+                  .filter((s) => s.value.startsWith("rss-"))
+                  .map((s) => [
+                    s.value,
+                    { count: s.count, isEstimate: s.isEstimate },
+                  ]),
+              );
+              this.feeds.set(
+                configured.map((f) => {
+                  const agg = countByKey.get(f.sourceKey);
+                  return {
+                    ...f,
+                    count: agg?.count ?? 0,
+                    isEstimate: agg?.isEstimate ?? false,
+                  };
+                }),
+              );
+              this.loading.set(false);
+            },
+            error: () => {
+              // GraphQL failed — still show configured feeds with zero counts.
+              this.feeds.set(
+                configured.map((f) => ({ ...f, count: 0, isEstimate: false })),
+              );
+              this.loading.set(false);
+            },
+          });
+      },
+      error: (err) => {
+        this.error.set(err);
+        this.loading.set(false);
+      },
+    });
   }
 
   getSearchParams(sourceKey: string): Record<string, string> {
@@ -108,34 +147,30 @@ export class RssFeedsComponent implements OnInit {
     };
   }
 
-  isPolling(sourceKey: string): boolean {
-    return this.polling().has(sourceKey);
+  isPolling(feedName: string): boolean {
+    return this.polling().has(feedName);
   }
 
-  pollNow(sourceKey: string): void {
-    // Extract feed name from key format "rss-<name>"
-    const name = sourceKey.replace(/^rss-/, "");
-    if (!name) return;
+  pollNow(feedName: string): void {
+    if (!feedName) return;
 
-    this.polling.update((s) => new Set([...s, sourceKey]));
+    this.polling.update((s) => new Set([...s, feedName]));
 
-    this.http
-      .post("/api/rss/poll", { feedNames: [name] })
-      .subscribe({
-        complete: () =>
-          this.polling.update((s) => {
-            const next = new Set(s);
-            next.delete(sourceKey);
-            return next;
-          }),
-        error: () => {
-          this.errors.addError("RSS feed poll request failed");
-          this.polling.update((s) => {
-            const next = new Set(s);
-            next.delete(sourceKey);
-            return next;
-          });
-        },
-      });
+    this.http.post("/api/rss/poll", { feedNames: [feedName] }).subscribe({
+      complete: () =>
+        this.polling.update((s) => {
+          const next = new Set(s);
+          next.delete(feedName);
+          return next;
+        }),
+      error: () => {
+        this.errors.addError("RSS feed poll request failed");
+        this.polling.update((s) => {
+          const next = new Set(s);
+          next.delete(feedName);
+          return next;
+        });
+      },
+    });
   }
 }

@@ -22,6 +22,20 @@ const defaultPollInterval = 15 * time.Minute
 // PollNowFunc triggers an on-demand poll of a specific feed by name.
 type PollNowFunc func(feedName string)
 
+// ListFeedsFunc returns the configured feeds and their current status.
+type ListFeedsFunc func() []FeedStatus
+
+// FeedStatus describes a configured feed for the UI, including its last
+// successful poll high-water mark (nil if never polled).
+type FeedStatus struct {
+	Name       string     `json:"name"`
+	SourceKey  string     `json:"sourceKey"`
+	URL        string     `json:"url"`
+	Enabled    bool       `json:"enabled"`
+	Interval   string     `json:"interval"`
+	LastPolled *time.Time `json:"lastPolled,omitempty"`
+}
+
 type poller struct {
 	config      Config
 	httpClient  *http.Client
@@ -53,6 +67,32 @@ func newPoller(config Config, db lazy.Lazy[*gorm.DB], imp lazy.Lazy[importer.Imp
 		stopped:     make(chan struct{}),
 		inflight:    make(map[string]bool),
 	}
+}
+
+// listFeeds returns the configured feeds with their last-polled high-water
+// mark from the DB. Used by the UI so configured feeds appear immediately,
+// even before any torrents have been imported.
+func (p *poller) listFeeds() []FeedStatus {
+	statuses := make([]FeedStatus, 0, len(p.config.Feeds))
+	for _, feed := range p.config.Feeds {
+		interval := feed.Interval
+		if interval <= 0 {
+			interval = defaultPollInterval
+		}
+		st := FeedStatus{
+			Name:      feed.Name,
+			SourceKey: feedSourceKey(feed.Name),
+			URL:       feed.URL,
+			Enabled:   feed.Enabled,
+			Interval:  interval.String(),
+		}
+		if last := p.loadLastSeen(feed.Name); !last.IsZero() {
+			lp := last
+			st.LastPolled = &lp
+		}
+		statuses = append(statuses, st)
+	}
+	return statuses
 }
 
 func (p *poller) start(ctx context.Context) {
