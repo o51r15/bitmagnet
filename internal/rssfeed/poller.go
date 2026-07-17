@@ -60,10 +60,7 @@ func (p *poller) start(ctx context.Context) {
 		if !feed.Enabled || feed.URL == "" {
 			continue
 		}
-		interval := defaultPollInterval
-		if feed.Interval > 0 {
-			interval = feed.Interval
-		}
+		interval := feed.ParseInterval(defaultPollInterval)
 		go p.runFeedLoop(ctx, feed, interval)
 	}
 
