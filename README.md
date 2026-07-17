@@ -3,7 +3,7 @@
 > **Community fork of [bitmagnet-io/bitmagnet](https://github.com/bitmagnet-io/bitmagnet).**
 > Not affiliated with the upstream project.
 
-A self-hosted BitTorrent indexer, DHT crawler, content classifier and torrent search engine with a web UI and GraphQL API. This fork adds stability fixes, Prowlarr integration, OMDb enrichment, DB size management, and VPN sidecar deployments.
+A self-hosted BitTorrent indexer, DHT crawler, content classifier and torrent search engine with a web UI and GraphQL API. This fork adds stability fixes, Prowlarr integration, bulk database import, RSS feed ingestion, OMDb and ThePornDB enrichment, DB size management, and VPN sidecar deployments.
 
 ```
 ghcr.io/o51r15/bitmagnet:latest
@@ -19,7 +19,13 @@ Full documentation is in the **[Wiki](https://github.com/o51r15/bitmagnet/wiki)*
 
 **Prowlarr integration** -- scheduled crawling of configured indexers, persistent local index (survives indexer downtime), per-indexer Crawl Now button, seed count refresh. [Wiki: Prowlarr Integration](https://github.com/o51r15/bitmagnet/wiki/Prowlarr-Integration)
 
+**Bulk database import** -- import existing torrent database dumps (RARBG, Pirate Bay, magnetico, and more) through the web UI. Auto-detects CSV, NDJSON, SQL dump, and SQLite formats, streams large files instead of loading them into memory, runs asynchronously with live progress, filters by content category, and trim-protects imported sources. [Wiki: Database Import](https://github.com/o51r15/bitmagnet/wiki/Database-Import)
+
+**RSS feed ingestion** -- poll RSS and Torznab feeds on a per-feed schedule and import new torrents into the index. Format-agnostic parser resolves an info hash from magnet links (hex or base32), Torznab/Newznab attributes, plain `info_hash` tags, ezRSS blocks, or a bare-hash GUID, and decodes non-UTF-8 feeds. [Wiki: RSS Feeds](https://github.com/o51r15/bitmagnet/wiki/RSS-Feeds)
+
 **OMDb enrichment** -- Rotten Tomatoes scores, Metacritic ratings, awards, box office data via the OMDb API. Runs automatically after TMDB classification on both DHT and Prowlarr torrents. [Wiki: OMDb Enrichment](https://github.com/o51r15/bitmagnet/wiki/OMDb-Enrichment)
+
+**Adult content classification** -- ThePornDB (TPDB) classifier matches and titles XXX content that TMDB does not cover. [Wiki: ThePornDB Classification](https://github.com/o51r15/bitmagnet/wiki/ThePornDB-Classification)
 
 **DB size management** -- configurable per-source trim with Prowlarr protection, dry-run mode, batch processing. [Wiki: DB Size Management](https://github.com/o51r15/bitmagnet/wiki/DB-Size-Management)
 
@@ -110,7 +116,10 @@ For VPN-protected crawling, Prowlarr integration, or advanced Postgres tuning, s
 | BEP-47 exclusion | Filters padding-file-only torrents from results |
 | Disk guardian | Shell script pauses crawling when disk usage exceeds threshold |
 | Prowlarr REST API | `POST /api/prowlarr/crawl` with per-indexer scheduling |
+| Database import | Web-UI import of CSV/NDJSON/SQL/SQLite dumps with format detection, streaming, category filtering, and trim protection |
+| RSS feeds | Scheduled RSS/Torznab feed polling into the importer with a format-agnostic parser (`POST /api/rss/poll`, `GET /api/rss/feeds`) |
 | OMDb classifier | Enriches TMDB-classified torrents with RT/Metacritic/awards |
+| ThePornDB classifier | Classifies and titles adult content that TMDB does not cover |
 | DB trim | Age-based cleanup per source with Prowlarr protection |
 | DHT sidecar | Split-container VPN deployment with dashboard status |
 
