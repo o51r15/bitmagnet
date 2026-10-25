@@ -59,6 +59,64 @@ workflows:
                 if_action:
                   set_content_type: xxx
                 else_action: unmatched
+            # ---- name-only rules (fork) ----
+            # Torrents with no file info (e.g. from database dump imports) can only be identified by name.
+            # Every rule below is gated on an empty file list, so torrents with files keep upstream behaviour.
+            - if_else:
+                condition:
+                  and:
+                    - "torrent.files.size() == 0"
+                    - "torrent.name.matches(keywords.name_audiobook)"
+                if_action:
+                  set_content_type: audiobook
+                else_action: unmatched
+            - if_else:
+                condition:
+                  and:
+                    - "torrent.files.size() == 0"
+                    - "torrent.name.matches(keywords.name_comic)"
+                if_action:
+                  set_content_type: comic
+                else_action: unmatched
+            - if_else:
+                condition:
+                  and:
+                    - "torrent.files.size() == 0"
+                    - "torrent.name.matches(keywords.name_ebook)"
+                    - "!torrent.name.matches(keywords.name_video)"
+                if_action:
+                  set_content_type: ebook
+                else_action: unmatched
+            - if_else:
+                condition:
+                  and:
+                    - "torrent.files.size() == 0"
+                    - "torrent.name.matches(keywords.name_software)"
+                    - "!torrent.name.matches(keywords.name_video)"
+                if_action:
+                  set_content_type: software
+                else_action: unmatched
+            - if_else:
+                condition:
+                  and:
+                    - "torrent.files.size() == 0"
+                    - "torrent.name.matches(keywords.name_music)"
+                    - "!torrent.name.matches(keywords.name_video)"
+                if_action:
+                  set_content_type: music
+                else_action: unmatched
+            - if_else:
+                condition:
+                  and:
+                    - "torrent.files.size() == 0"
+                    - "!torrent.name.matches(keywords.name_episode)"
+                    - or:
+                        - "torrent.name.matches(keywords.xxx)"
+                        # scene-dump convention: "Studio - Performer - Title DD.MM.YYYY mp4"
+                        - 'torrent.name.matches(r"(?i)^[a-z0-9]+ - .+ \d{2}\.\d{2}\.\d{4} (mp4|wmv|mkv|avi|mov)$")'
+                if_action:
+                  set_content_type: xxx
+                else_action: unmatched
     # if the name contains a full date, attach it to the result as it's a good indicator of content type:
     - find_match:
         - parse_date
@@ -82,6 +140,13 @@ workflows:
           or:
             - "result.contentType in [contentType.movie, contentType.tv_show]"
             - "torrent.files.map(f, f.extension in extensions.video ? f.size : - f.size).sum() > 100*mb"
+            # name-only torrents (fork): parse the name if it looks like a video release
+            - and:
+                - "torrent.files.size() == 0"
+                - "result.contentType == contentType.unknown"
+                - or:
+                    - "torrent.name.matches(keywords.name_video)"
+                    - "torrent.name.matches(keywords.name_episode)"
         if_action:
           find_match:
             # parse video-related attributes from the torrent name;
@@ -261,6 +326,7 @@ keywords:
     - threesome
     - "*wank*"
     - "*xxx*"
+    - nsfw
   banned:
     - pa?edo(fil*|phil*)?
     - preteen
@@ -280,6 +346,74 @@ keywords:
     - kinderkutje
     - yvm
     - (#|10|11|12|13|14|15|16|17) ?y ?o
+  # ---- name-only keyword groups (fork) — used only for torrents with no file info ----
+  name_video:
+    - mkv
+    - mp4
+    - avi
+    - wmv
+    - m4v
+    - mov
+    - mpe?g
+    - rmvb
+    - flv
+    - vob
+    - xvid
+    - divx
+    - x26#
+    - h ?26#
+    - hevc
+    - (480|576|720|1080|2160)p
+    - 4k
+    - uhd
+    - blu-?ray
+    - b(d|r)-?rip
+    - web-?(dl|rip)
+    - hdtv
+    - dvd-?(rip|scr|r|5|9)
+    - hd-?rip
+    - hdcam
+    - telesync
+    - remux
+  name_episode:
+    - s#+ ?e#+
+    - season ?#+
+    - complete ?series
+  name_music:
+    - mp3
+    - flac
+    - alac
+    - lossless
+    - discography
+    - "#+ ?kbps"
+    - (16|24) ?bit
+    - vinyl ?rip
+    - cd ?rip
+  name_ebook:
+    - epub
+    - mobi
+    - azw#?
+    - pdf
+    - fb2
+    - djvu
+    - e-?books?
+  name_audiobook:
+    - audio ?books?
+    - (un)?abridged
+    - m4b
+    - narrated
+  name_comic:
+    - cbr
+    - cbz
+    - comics?
+  name_software:
+    - x64
+    - x86
+    - keygen
+    - activator
+    - portable
+    - macos
+    - win(32|64)
 flag_definitions:
   local_search_enabled: bool
   apis_enabled: bool
