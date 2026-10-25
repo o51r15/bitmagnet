@@ -26,6 +26,11 @@ services:
       - POSTGRES_PASSWORD=postgres        # change if you want a stronger password
       - TMDB_API_KEY=your_tmdb_key_here  # free at themoviedb.org/settings/api
       - TZ=UTC
+      # Optional enrichment — off unless set to true. Note the _API_KEY spelling.
+      - OMDB_ENABLED=false
+      - OMDB_API_KEY=                     # omdbapi.com/apikey.aspx
+      - TPDB_ENABLED=false
+      - TPDB_API_KEY=                     # theporndb.net
     volumes:
       - /home/o51r15/docker/bitmagnet/config:/root/.config/bitmagnet
     command:
