@@ -76,7 +76,10 @@ workflows:
                 condition:
                   and:
                     - "torrent.files.map(f, f.size).sum() == 0"
-                    - "torrent.name.matches(keywords.name_comic)"
+                    - or:
+                        - "torrent.name.matches(keywords.name_comic)"
+                        # comic release convention: "Title 019 (2014) (digital) (Group)", "01-04 (Of 04)"
+                        - 'torrent.name.matches(r"(?i)\((digital|of \d+)\)")'
                 if_action:
                   set_content_type: comic
                 else_action: unmatched
@@ -88,6 +91,15 @@ workflows:
                     - "!torrent.name.matches(keywords.name_video)"
                 if_action:
                   set_content_type: ebook
+                else_action: unmatched
+            - if_else:
+                condition:
+                  and:
+                    - "torrent.files.map(f, f.size).sum() == 0"
+                    - "torrent.name.matches(keywords.name_game)"
+                    - "!torrent.name.matches(keywords.name_video)"
+                if_action:
+                  set_content_type: game
                 else_action: unmatched
             - if_else:
                 condition:
@@ -118,6 +130,15 @@ workflows:
                         - 'torrent.name.matches(r"(?i)^[a-z0-9]+ - .+ \d{2}\.\d{2}\.\d{4} (mp4|wmv|mkv|avi|mov)$")'
                 if_action:
                   set_content_type: xxx
+                else_action: unmatched
+            # anime fansub episode convention: "[Group] Title - 14 [1080p]", "[gg]_Title_-_24_[A6B674F2].mkv"
+            - if_else:
+                condition:
+                  and:
+                    - "torrent.files.map(f, f.size).sum() == 0"
+                    - 'torrent.name.matches(r"^\[[^\]]+\][ _]*.+?[ _]-[ _]\d{1,4}(v\d)?([ _.\[(]|$)")'
+                if_action:
+                  set_content_type: tv_show
                 else_action: unmatched
     # if the name contains a full date, attach it to the result as it's a good indicator of content type:
     - find_match:
@@ -391,6 +412,10 @@ keywords:
     - (16|24) ?bit
     - vinyl ?rip
     - cd ?rip
+    - various ?artists
+    - sacd
+    - "#+ ?cds"
+    - greatest ?hits
   name_ebook:
     - epub
     - mobi
@@ -416,6 +441,35 @@ keywords:
     - portable
     - macos
     - win(32|64)
+  name_game:
+    # platforms
+    - ps(2|3|4|5)
+    - psp
+    - ps ?vita
+    - xbox ?(360|one)?
+    - wii ?u?
+    - nds
+    - 3ds
+    - gba
+    - nintendo ?switch
+    - pc ?games?
+    # release groups / repackers (avoid ambiguous words like "reloaded", "rune")
+    - gog
+    - codex
+    - plaza
+    - tenoke
+    - skidrow
+    - fitgirl
+    - dodi
+    - elamigos
+    - empress
+    - tinyiso
+    - darksiders
+    - hoodlum
+    - cpy
+    - ali213
+    - r\.?g\.? ?mechanics
+    - dlc
 flag_definitions:
   local_search_enabled: bool
   apis_enabled: bool

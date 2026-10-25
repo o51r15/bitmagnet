@@ -19,6 +19,9 @@ func TestClassifierNameOnly(t *testing.T) {
 	movie := model.NewNullContentType(model.ContentTypeMovie)
 	tv := model.NewNullContentType(model.ContentTypeTvShow)
 	xxx := model.NewNullContentType(model.ContentTypeXxx)
+	game := model.NewNullContentType(model.ContentTypeGame)
+	comic := model.NewNullContentType(model.ContentTypeComic)
+	music := model.NewNullContentType(model.ContentTypeMusic)
 
 	testCases := []struct {
 		name          string
@@ -44,6 +47,26 @@ func TestClassifierNameOnly(t *testing.T) {
 		{"CumLouder - Susana Alcala 27.07.2020 mp4", xxx, ""},
 		{"RKPrime - Adriana Maya - Backyard Maya 29.07.2020 mp4", xxx, ""},
 		{"Hot Japanese girls (NSFW)", xxx, ""},
+		// games
+		{"Jet.Lancer.v1.1.10-GOG", game, ""},
+		{"Iris.Fall.PS4-UNLiMiTED", game, ""},
+		{"UFO.The.Ranch-TENOKE", game, ""},
+		{"Dead Man's Draw (PC Games)", game, ""},
+		{"Castlevania: Lords of Shadow [R.G. Mechanics]", game, ""},
+		{"The Escapists v0.799 Cracked-ALI213 [VIPER666]", game, ""},
+		{"Borderlands.2.VR.Incl.Update.and.DLC.PS4-DUPLEX", game, ""},
+		{"Wii Auto-NAND", game, ""},
+		{"The.Matrix.Reloaded.2003.1080p.BluRay.x264", movie, "The Matrix Reloaded"},
+		// comics
+		{"Bloodshot and H.A.R.D. Corps 019 (2014) (digital) (Minutemen-Spa", comic, ""},
+		{"Deadshot 01-04 (Of 04) (1988) (digital) (Son of Ultron-Empire)", comic, ""},
+		// anime fansub episodes
+		{"[HorribleSubs] Saint Seiya Omega - 14 [1080p]", tv, ""},
+		{"[gg]_Valvrave_the_Liberator_-_24_[A6B674F2].mkv", tv, ""},
+		// music
+		{"Various Artists - Tippin' The Scales (2015) [SWZ]", music, ""},
+		{"Linn Selektions SACD", music, ""},
+		{"Soft Rock Ballads-3CDs", music, ""},
 		{"some random words with nothing useful", unknown, ""},
 	}
 
