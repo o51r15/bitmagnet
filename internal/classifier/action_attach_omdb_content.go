@@ -25,19 +25,18 @@ func (attachOMDBContentAction) compileAction(ctx compilerContext) (action, error
 
 	return action{
 		run: func(ctx executionContext) (classification.Result, error) {
+			// Enrichment is optional: this action runs at the top level of the workflow, where an
+			// "unmatched" error would abort classification of the whole torrent. When there is
+			// nothing to enrich, return the result unchanged instead.
 			cl := ctx.result
-			if cl.Content == nil {
-				return cl, classification.ErrUnmatched
-			}
-
-			if ctx.omdbClient == nil {
-				return cl, classification.ErrUnmatched
+			if cl.Content == nil || ctx.omdbClient == nil {
+				return cl, nil
 			}
 
 			// Find the IMDB ID from the content's attributes
 			imdbID, ok := cl.Content.Identifier("imdb")
 			if !ok || imdbID == "" {
-				return cl, classification.ErrUnmatched
+				return cl, nil
 			}
 
 			result, err := ctx.omdbClient.LookupByIMDBID(ctx.Context, imdbID)

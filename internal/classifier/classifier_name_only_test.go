@@ -35,6 +35,11 @@ func TestClassifierNameOnly(t *testing.T) {
 		{"Stephen King - The Stand (Unabridged) Audiobook", model.NewNullContentType(model.ContentTypeAudiobook), ""},
 		{"Learning Go - 2nd Edition (2023) EPUB", model.NewNullContentType(model.ContentTypeEbook), ""},
 		{"Adobe.Photoshop.2024.x64.Portable", model.NewNullContentType(model.ContentTypeSoftware), ""},
+		// names ending in something extension-like get a synthetic zero-size file upstream:
+		{"Adobe.Photoshop.x64.Portable", model.NewNullContentType(model.ContentTypeSoftware), ""},
+		{"Some.Movie.Title.2019.1080p.BluRay.x264.mkv", movie, "Some Movie Title"},
+		{"Some.Show.S02E05.720p.WEB.x264.mkv", tv, "Some Show"},
+		{"A Book About Things (2021).epub", model.NewNullContentType(model.ContentTypeEbook), ""},
 		{"JacquieEtMichelTV.20.07.29.Eva.Enjoys.Anal.FRENCH.XXX.1080p.MP4-TRASHBIN", xxx, ""},
 		{"CumLouder - Susana Alcala 27.07.2020 mp4", xxx, ""},
 		{"RKPrime - Adriana Maya - Backyard Maya 29.07.2020 mp4", xxx, ""},

@@ -61,11 +61,13 @@ workflows:
                 else_action: unmatched
             # ---- name-only rules (fork) ----
             # Torrents with no file info (e.g. from database dump imports) can only be identified by name.
-            # Every rule below is gated on an empty file list, so torrents with files keep upstream behaviour.
+            # Gate is "total file size is zero", not "no files": for no-info torrents upstream synthesizes a
+            # zero-size file whenever the name ends in something extension-like (".mkv", ".x64", ".Portable").
+            # Real torrents with file info always have sizes, so they keep upstream behaviour.
             - if_else:
                 condition:
                   and:
-                    - "torrent.files.size() == 0"
+                    - "torrent.files.map(f, f.size).sum() == 0"
                     - "torrent.name.matches(keywords.name_audiobook)"
                 if_action:
                   set_content_type: audiobook
@@ -73,7 +75,7 @@ workflows:
             - if_else:
                 condition:
                   and:
-                    - "torrent.files.size() == 0"
+                    - "torrent.files.map(f, f.size).sum() == 0"
                     - "torrent.name.matches(keywords.name_comic)"
                 if_action:
                   set_content_type: comic
@@ -81,7 +83,7 @@ workflows:
             - if_else:
                 condition:
                   and:
-                    - "torrent.files.size() == 0"
+                    - "torrent.files.map(f, f.size).sum() == 0"
                     - "torrent.name.matches(keywords.name_ebook)"
                     - "!torrent.name.matches(keywords.name_video)"
                 if_action:
@@ -90,7 +92,7 @@ workflows:
             - if_else:
                 condition:
                   and:
-                    - "torrent.files.size() == 0"
+                    - "torrent.files.map(f, f.size).sum() == 0"
                     - "torrent.name.matches(keywords.name_software)"
                     - "!torrent.name.matches(keywords.name_video)"
                 if_action:
@@ -99,7 +101,7 @@ workflows:
             - if_else:
                 condition:
                   and:
-                    - "torrent.files.size() == 0"
+                    - "torrent.files.map(f, f.size).sum() == 0"
                     - "torrent.name.matches(keywords.name_music)"
                     - "!torrent.name.matches(keywords.name_video)"
                 if_action:
@@ -108,7 +110,7 @@ workflows:
             - if_else:
                 condition:
                   and:
-                    - "torrent.files.size() == 0"
+                    - "torrent.files.map(f, f.size).sum() == 0"
                     - "!torrent.name.matches(keywords.name_episode)"
                     - or:
                         - "torrent.name.matches(keywords.xxx)"
@@ -142,7 +144,7 @@ workflows:
             - "torrent.files.map(f, f.extension in extensions.video ? f.size : - f.size).sum() > 100*mb"
             # name-only torrents (fork): parse the name if it looks like a video release
             - and:
-                - "torrent.files.size() == 0"
+                - "torrent.files.map(f, f.size).sum() == 0"
                 - "result.contentType == contentType.unknown"
                 - or:
                     - "torrent.name.matches(keywords.name_video)"
